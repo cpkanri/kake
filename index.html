@@ -3727,19 +3727,23 @@ function fillWaterSheet(ws, yyyy, mm, holidaySet) {
   // 月 I=9, 火 J=10, 水 K=11, 木 L=12, 金 M=13
   const DAY_COL = { mon: 9, tue: 10, wed: 11, thu: 12, fri: 13 };
   const NEXT_WEEK_COL = 14; // N列 = 次週の最初の平日
+  // 加計テンプレ: 積算テーブル R4-R12（無効電力量 R6 / デマンド R7 が上殿より +2 行追加）
+  // 測定テーブル R16-R36（測定者 R15 / 見出し R13-R14 / 備考 R38）
+  // 上殿のオフセットから一律 +2 ずれている。R6/R7/R37 はキー未定義のため空欄のまま。
   const ITEM_OFFSETS = {
-    power200v: 0, power100v: 1, water: 2, diesel: 3,
-    returnSludge: 4, excessSludge: 5, discharge: 6,
-    tempIn: 10, tempDitch: 11, tempOut: 12,
-    transIn: 16, transOut: 17,
-    phIn: 21, phDitch: 22, phOut: 23,
-    sv10: 24, sv20: 25, sv30: 26, sv24h: 27,
-    mlss: 28, sludgeLevel: 29, chlorine: 30
+    power200v: 0, power100v: 1,           // R4 全日電力量, R5 力測電力量
+    water: 4, diesel: 5,                   // R8 水道使用量, R9 軽油残量
+    returnSludge: 6, excessSludge: 7, discharge: 8,  // R10/R11/R12 各種流量
+    tempIn: 12, tempDitch: 13, tempOut: 14,           // R16/R17/R18 水温
+    transIn: 18, transOut: 19,             // R22/R23 透視度
+    phIn: 23, phDitch: 24, phOut: 25,      // R27/R28/R29 PH
+    sv10: 26, sv20: 27, sv30: 28, sv24h: 29,          // R30-R33 SV
+    mlss: 30, sludgeLevel: 31, chlorine: 32           // R34/R35/R36 MLSS/汚泥界面/残留塩素
   };
-  // 第1週データRow=4, dateRow=3, inspectorRow=13 （各週+46オフセット）
+  // 加計: 第1週データRow=4, dateRow=3, inspectorRow=15（各週+46オフセット）
   const DATA_ROW_BASE = 4;
   const DATE_ROW_BASE = 3;
-  const INSP_ROW_BASE = 13;
+  const INSP_ROW_BASE = 15;
 
   // ===== 第1週I列: 前月最終点検日のデータを書き込む =====
   // （第2週以降のI列はテンプレート数式 =N49 等で自動参照される）
@@ -3751,12 +3755,18 @@ function fillWaterSheet(ws, yyyy, mm, holidaySet) {
       const cell = ws.getCell(DATE_ROW_BASE, 9);
       cell.value = toExcelDate(prevLast.date);
       cell.numFmt = 'm"月"d"日("aaa")"';
-      RUISAN_KEYS_I.forEach((key, i) => {
-        ws.getCell(DATA_ROW_BASE + i, 9).value = prevLast.data[key] !== undefined ? prevLast.data[key] : null;
+      RUISAN_KEYS_I.forEach((key) => {
+        const off = ITEM_OFFSETS[key];
+        if (off == null) return;
+        ws.getCell(DATA_ROW_BASE + off, 9).value = prevLast.data[key] !== undefined ? prevLast.data[key] : null;
       });
     } else {
       ws.getCell(DATE_ROW_BASE, 9).value = null;
-      for (let r = 0; r < 7; r++) ws.getCell(DATA_ROW_BASE + r, 9).value = null;
+      RUISAN_KEYS_I.forEach((key) => {
+        const off = ITEM_OFFSETS[key];
+        if (off == null) return;
+        ws.getCell(DATA_ROW_BASE + off, 9).value = null;
+      });
     }
   }
 
@@ -3790,11 +3800,11 @@ function fillWaterSheet(ws, yyyy, mm, holidaySet) {
 
     // ===== 各曜日データを書き込み =====
     // アプリ側のデータキー: mon, tue, wed, thu, nextMon（アプリ上は「金」ラベル）
-    // 積算値テーブル(Row4-10)用の列マッピング: I列起点
+    // 加計: 積算値テーブル(Row4-12)用の列マッピング: I列起点
     const DAY_COL_RUISAN = { mon: 9, tue: 10, wed: 11, thu: 12, fri: 13 };
-    // 測定場所テーブル(Row14以降)用の列マッピング: J列起点（I列はラベル）
+    // 加計: 測定場所テーブル(Row16以降)用の列マッピング: J列起点（I列はラベル）
     const DAY_COL_MEASURE = { mon: 10, tue: 11, wed: 12, thu: 13, fri: 14 };
-    // ITEM_OFFSETS のうち、積算値テーブル(Row4-10、offset 0-6)に属するキー
+    // ITEM_OFFSETS のうち、積算値テーブル(Row4-12、offset 0-8)に属するキー
     const RUISAN_KEYS = ["power200v", "power100v", "water", "diesel", "returnSludge", "excessSludge", "discharge"];
 
     for (const dk in DAY_COL_RUISAN) {
@@ -3814,8 +3824,8 @@ function fillWaterSheet(ws, yyyy, mm, holidaySet) {
       if (day.inspector) setCell(ws, inspRow, colMeasure, day.inspector);
     }
 
-    // 備考（Row = dataRowBase + 32）: 測定場所テーブル所属なのでJ列起点
-    const bikouRow = dataRowBase + 32;
+    // 備考（加計: Row = dataRowBase + 34 → 第1週R38）: 測定場所テーブル所属なのでJ列起点
+    const bikouRow = dataRowBase + 34;
     for (const dk in DAY_COL_MEASURE) {
       const col = DAY_COL_MEASURE[dk];
       const dataKey = APP_KEY_MAP[dk];
