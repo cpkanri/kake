@@ -150,7 +150,7 @@ function matchMonth(cellValue, month) {
   return norm === month || String(cellValue) === month;
 }
 
-// ===== MLDO 自動計算（上殿固有・月1回固定書込） =====
+// ===== MLDO 自動計算（加計・月1回固定書込） =====
 // 計算式: base = (530 - 水温 × 16) ÷ 100、範囲 ±0.50、精度 0.01
 // データソース: 日常水質シートの水温データ（ディッチ）
 // 書き込み先: 水質管理報告（2/2）G列（MLDO, Row49〜79 の該当日）
@@ -657,7 +657,7 @@ function doGet(e) {
     var authFail = requireAuth(a, token);
     if (authFail) return authFail;
 
-    if (a==='ping') return jsonResponse({status:'ok',message:'上殿週報API稼働中'});
+    if (a==='ping') return jsonResponse({status:'ok',message:'加計週報API稼働中'});
     if (a==='verifyToken') return verifyTokenApi(token);
     if (a==='getData') return getData(e.parameter.month);
     if (a==='getAllData') return getAllData(e.parameter.month);
@@ -797,7 +797,7 @@ function exportExcel(month, templateId) {
   if(!templateId) return jsonResponse({error:'テンプレートIDなし'});
 
   try {
-    var tf=DriveApp.getFileById(templateId),ml=month.replace('-','年')+'月',nf='上殿'+ml.substring(5);
+    var tf=DriveApp.getFileById(templateId),ml=month.replace('-','年')+'月',nf='加計'+ml.substring(5);
     var cf=tf.makeCopy(nf),nid=cf.getId(),wb=SpreadsheetApp.openById(nid);
     var ss2=SpreadsheetApp.getActiveSpreadsheet();
     var sheets=wb.getSheets();
@@ -892,8 +892,12 @@ function findRow(sheet,month,week,dayName) {
   for(var i=0;i<d.length;i++){if(matchMonth(d[i][0],month)&&d[i][1]===parseInt(week)&&d[i][2]===dayName) return i+2;} return -1;
 }
 function sortSheet(sheet) {
-  var lr=sheet.getLastRow();if(lr<=2)return;
-  sheet.getRange(2,1,lr-1,sheet.getLastColumn()).sort([{column:1,ascending:true},{column:2,ascending:true},{column:3,ascending:true}]);
+  try {
+    var lr=sheet.getLastRow();if(lr<=2)return;
+    sheet.getRange(2,1,lr-1,sheet.getLastColumn()).sort([{column:1,ascending:true},{column:2,ascending:true},{column:3,ascending:true}]);
+  } catch(err) {
+    Logger.log('sortSheet skipped: ' + err.message);
+  }
 }
 function jsonResponse(obj) { return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON); }
 function authorizeAll() { var f=DriveApp.getFileById('1sSvOu617yCabXjFLh39k8EpfhGAzP_Y6');f.makeCopy('テスト');SpreadsheetApp.getActiveSpreadsheet();UrlFetchApp.fetch('https://www.google.com');Logger.log('全権限OK'); }
