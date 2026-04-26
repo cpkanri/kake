@@ -1,0 +1,903 @@
+// 加計浄化センター週報アプリ GASバックエンド（完全版v6 - 加計用21項目対応）
+
+var FIELD_MAP = {
+  power200v: 5, power100v: 6, water: 7, diesel: 8,
+  returnSludge: 9, excessSludge: 10, discharge: 11,
+  tempIn: 12, tempDitch: 13, tempOut: 14, transIn: 15, transOut: 16,
+  phIn: 17, phDitch: 18, phOut: 19, sv10: 20, sv20: 21, sv30: 22, sv24h: 23,
+  mlss: 24, sludgeLevel: 25, chlorine: 26, inspector: 27,
+  tempFinal: 29, transFinal: 30, phFinal: 31, bikou: 32,
+};
+var DAY_NAMES = { mon: '月', tue: '火', wed: '水', thu: '木', fri: '金' };
+var DAY_REVERSE = { '月': 'mon', '火': 'tue', '水': 'wed', '木': 'thu', '金': 'fri' };
+var WEEK_CONFIG = {
+  1: { dataRow: 4, dateRow: 3, inspectorRow: 13 },
+  2: { dataRow: 50, dateRow: 49, inspectorRow: 59 },
+  3: { dataRow: 96, dateRow: 95, inspectorRow: 105 },
+  4: { dataRow: 142, dateRow: 141, inspectorRow: 151 },
+  5: { dataRow: 188, dateRow: 187, inspectorRow: 197 },
+};
+var ITEM_OFFSETS = {
+  power200v: 0, power100v: 1, water: 2, diesel: 3,
+  returnSludge: 4, excessSludge: 5, discharge: 6,
+  tempIn: 10, tempDitch: 11, tempOut: 12, transIn: 16, transOut: 17,
+  phIn: 21, phDitch: 22, phOut: 23, sv10: 24, sv20: 25, sv30: 26, sv24h: 27,
+  mlss: 28, sludgeLevel: 29, chlorine: 30,
+};
+var DAY_COLUMNS = { mon: 10, tue: 11, wed: 12, thu: 13, fri: 14 };
+var ELEC_FIELDS = ['voltage1p','mode1p','switch1p','power1p','voltage3p','mode3p','switch3p','power3p','pumpWellLook','pumpWellStatus','pumpWellReading','flowLook','flowStatus','flowReading','uvLook','uvStatus','uvValue','codValue','tnLook','tnStatus','tnReading','tpReading','pressureLook','pressureStatus','pressureReading','generatorLook','engineLook','fuelTankLook','fuelRemain','generatorHours','alarmStatus'];
+// 加計浄化センター 21項目
+var EQUIP_NAMES = ['thickScraperHr','thickPump1Hr','thickPump2Hr','sludgeMixerHr','thickAerationBlowerHr','returnWaterPump1Hr','returnWaterPump2Hr','drainPump1Hr','drainPump2Hr','aerationBlower1Hr','aerationBlower2Hr','mainPump1Hr','mainPump2Hr','aeration11Hr','aeration12Hr','finalScraperHr','returnPump11Hr','returnPump12Hr','excessPumpHr','deodorFanHr','screenUnitHr'];
+var EQUIP_LABELS = ['濃縮汚泥掻寄機','№１濃縮汚泥ポンプ','№２濃縮汚泥ポンプ','濃縮汚泥攪拌機','濃縮汚泥曝気ブロワ','№１返流水ポンプ','№２返流水ポンプ','№１床排水ポンプ','№２床排水ポンプ','№１曝気ブロワ','№2曝気ブロワ','№１主ポンプ','№２主ポンプ','№１-１エアレーション装置','№１-２エアレーション装置','№１終沈汚泥掻寄機','№１-１返送汚泥ポンプ','№１-２返送汚泥ポンプ','№１余剰汚泥ポンプ','脱臭ファン','スクリーンユニット'];
+var EQUIP_WEEK_START = { 1: 7, 2: 36, 3: 65, 4: 94, 5: 123 };
+// 加計: 1ブロック=71行（page1 R3-R32, page2 R38-R71）
+var ELEC_WEEK_START = { 1: 3, 2: 74, 3: 145, 4: 216, 5: 287 };
+var ELEC_DAY_COL = { mon: 7, tue: 8, wed: 9, thu: 10, fri: 11 };
+// 加計の電気項目オフセット: index.html ELEC_SECTIONS と完全に一致させる必要あり
+// page1 (R3-R31, offset 0-28): 引込・受電/変圧器/低圧分岐
+// page2 (R38-R70, offset 35-67): 計装/発電機/通報
+var ELEC_OFFSETS = {
+  // page 1
+  voltage:0, voltageMode:1, powerFactor:2, current:3, currentMode:4,
+  ePowerRead:5, ePowerUse:6, eReceiveSet:7, eOnOff:8,
+  trMainTemp:9, trNoise:10,
+  voltage210:11, voltage210Mode:12, current210:13, current210Mode:14,
+  light210:15, lightMode:16, lowVoltSrc:17,
+  ctrlPanel1Read:18, ctrlPanel1Use:19, ctrlPanel2Read:20, ctrlPanel2Use:21,
+  ctrlPanel3Read:22, ctrlPanel3Use:23, ctrlPanel4Read:24, ctrlPanel4Use:25,
+  cap1:26, cap2:27, cap3:28,
+  // page 2 (R38=offset 35)
+  pumpWellLook:35, pumpWellStatus:36, pumpWellReading:37,
+  doLook:38, doStatus:39, doReading:40,
+  returnFlowLook:41, returnFlowStatus:42, returnFlowReading:43, returnFlowTotal:44,
+  excessFlowLook:45, excessFlowStatus:46, excessFlowReading:47, excessFlowTotal:48,
+  outFlowLook:49, outFlowStatus:50, outFlowReading:51, outFlowTotal:52,
+  uvLook:53, uvStatus:54, uvValue:55, codValue:56,
+  tnLook:57, tnStatus:58, tnReading:59, tpReading:60,
+  pressureLook:61, pressureStatus:62, pressureReading:63,
+  generatorLook:64, fuelTankLook:65, fuelRemain:66,
+  alarmStatus:67
+};
+
+// 機械設備Excel位置マッピング
+// データ列: G=7(月), I=9(火), K=11(水), M=13(木) ※金曜はExcelにない可能性あり
+// 実際にはG,I,K,Mが月水木金(4日)で、火曜はE列
+var MECH_DAY_COL = { mon: 7, tue: 9, wed: 11, thu: 13 };
+// 各週の1/2と2/2の開始行
+var MECH_WEEK = {
+  1: { p1: 0, p2: 63 },
+  2: { p1: 125, p2: 188 },
+  3: { p1: 250, p2: 313 },
+  4: { p1: 375, p2: 438 },
+  5: { p1: 500, p2: 563 },
+};
+// 機械設備1/2: キー → Excel行番号(Week1基準の絶対行)
+var MECH_1_MAP = {
+  pumpWellCheck: 4, mainPump1Current: 5, mainPump1Pressure: 6, mainPump1Vibration: 7,
+  mainPump2Current: 8, mainPump2Pressure: 9, mainPump2Vibration: 10,
+  mainPumpMode: 11, mainPumpPriority: 12,
+  screenVibration: 13, screenDebris: 14, screenOperation: 15,
+  aeration1Current: 16, aeration1Vibration: 17, aeration1Mode: 18,
+  aeration2Current: 19, aeration2Vibration: 20, aeration2Mode: 21,
+  aeration3Current: 22, aeration3Vibration: 23, aeration3Mode: 24,
+  defoamNozzle: 25, defoamStatus: 26,
+  finalScraperCurrent: 27, finalScraperVibration: 28,
+  finalSkimmerOperation: 29, finalSkimmerScum: 30,
+  sludgePump1Current: 31, sludgePump1Pressure: 32, sludgePump1Vibration: 33,
+  sludgePump2Current: 34, sludgePump2Pressure: 35, sludgePump2Vibration: 36,
+  sludgePumpMode: 37, sludgePumpSelect: 38,
+  returnPump1Current: 39, returnPump1Pressure: 40, returnPump1Vibration: 41,
+  returnPump2Current: 42, returnPump2Pressure: 43, returnPump2Vibration: 44,
+  returnPumpMode: 45, returnPumpPriority: 46,
+  thickPumpCurrent: 47, thickPumpPressure: 48, thickPumpVibration: 49, thickPumpMode: 50,
+  drainPumpVibration: 51,
+  thickScraperCurrent: 52, thickScraperVibration: 53,
+  thickSkimmerOperation: 54,
+  sludgeMixerCurrent: 55, sludgeMixerVibration: 56, sludgeMixerMode: 57,
+};
+// 機械設備2/2: キー → Excel行番号(Week1基準の絶対行)
+var MECH_2_MAP = {
+  treatWater1Current: 67, treatWater1Pressure: 68, treatWater1Vibration: 69,
+  treatWater2Current: 70, treatWater2Pressure: 71, treatWater2Vibration: 72,
+  treatWaterMode: 73,
+  pressureTankLeak: 74, pressureTankPressure: 75,
+  chlorineRemain: 76,
+  strainerRawPressure: 77, strainerTreatPressure: 78,
+  supplyFanVibration: 79, supplyFanMode: 80,
+  exhaustFanVibration: 81, exhaustFanMode: 82,
+  deodor1Leak: 83, deodor1Exit: 84,
+  deodor2Leak: 85, deodor2Exit: 86,
+  deodor3Leak: 87, deodor3Exit: 88,
+};
+
+// ===== ユーティリティ =====
+
+// 月表記を YYYY-MM 形式に正規化（"2026-01", "2026-1", "2026/01", "1月" など）
+function normalizeMonth(v) {
+  if (v === null || v === undefined || v === '') return '';
+  if (v instanceof Date) {
+    return v.getFullYear() + '-' + ('0' + (v.getMonth() + 1)).slice(-2);
+  }
+  var s = String(v).trim();
+  // "YYYY-MM" or "YYYY-M"
+  var m = s.match(/^(\d{4})[-\/](\d{1,2})$/);
+  if (m) return m[1] + '-' + ('0' + m[2]).slice(-2);
+  // "YYYY年MM月" or "YYYY年M月"
+  m = s.match(/^(\d{4})年(\d{1,2})月$/);
+  if (m) return m[1] + '-' + ('0' + m[2]).slice(-2);
+  // "MM月" or "M月"（年なし → 当年）
+  m = s.match(/^(\d{1,2})月$/);
+  if (m) {
+    var y = new Date().getFullYear();
+    return y + '-' + ('0' + m[1]).slice(-2);
+  }
+  return s;
+}
+
+// 日付をYYYY-MM-DD文字列に変換（Sheetで自動Date化を防ぐ用途）
+function toDateStr(v) {
+  if (v === null || v === undefined || v === '') return '';
+  if (v instanceof Date) {
+    return v.getFullYear() + '-' + ('0' + (v.getMonth() + 1)).slice(-2) + '-' + ('0' + v.getDate()).slice(-2);
+  }
+  return String(v);
+}
+
+function matchMonth(cellValue, month) {
+  if (cellValue === month) return true;
+  if (cellValue instanceof Date) { var y=cellValue.getFullYear(),m=('0'+(cellValue.getMonth()+1)).slice(-2); return (y+'-'+m)===month; }
+  var norm = normalizeMonth(cellValue);
+  return norm === month || String(cellValue) === month;
+}
+
+// ===== MLDO 自動計算（上殿固有・月1回固定書込） =====
+// 計算式: base = (530 - 水温 × 16) ÷ 100、範囲 ±0.50、精度 0.01
+// データソース: 日常水質シートの水温データ（ディッチ）
+// 書き込み先: 水質管理報告（2/2）G列（MLDO, Row49〜79 の該当日）
+// 月1回のみ実行し、既に値があるセルは上書きしない
+function calcMldoBase(waterTemp) {
+  if (waterTemp === null || waterTemp === undefined || waterTemp === '' || isNaN(Number(waterTemp))) return null;
+  var t = Number(waterTemp);
+  var base = (530 - t * 16) / 100;
+  // ランダム変動 ±0.50
+  var variation = (Math.random() * 1.0 - 0.5);
+  var v = base + variation;
+  // 精度 0.01
+  return Math.round(v * 100) / 100;
+}
+
+// 当月のMLDO計算状態をチェック（ボタンバッジ用）
+function checkMldoStatus(month) {
+  if (!month) return jsonResponse({error:'月が指定されていません'});
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var ws = ss.getSheetByName('日常水質');
+    if (!ws || ws.getLastRow() <= 1) {
+      return jsonResponse({needsCompute:false, dataCount:0, computedCount:0, pendingCount:0});
+    }
+
+    // 日常水質から当月の水温ディッチ入力日数を収集
+    var data = ws.getRange(2, 1, ws.getLastRow() - 1, 32).getValues();
+    var tempDates = {};
+    for (var i = 0; i < data.length; i++) {
+      var row = data[i];
+      if (!matchMonth(row[0], month)) continue;
+      var dateStr = toDateStr(row[3]);
+      if (!dateStr) continue;
+      var tempDitch = row[FIELD_MAP.tempDitch - 1];
+      if (tempDitch !== '' && tempDitch !== null && !isNaN(Number(tempDitch))) {
+        tempDates[dateStr] = true;
+      }
+    }
+    var dataCount = Object.keys(tempDates).length;
+
+    // MLDOログから当月の計算済み日数を取得
+    var mldoLog = ss.getSheetByName('MLDOログ');
+    var computedCount = 0;
+    if (mldoLog && mldoLog.getLastRow() > 1) {
+      var logData = mldoLog.getDataRange().getValues();
+      for (var j = 1; j < logData.length; j++) {
+        if (normalizeMonth(logData[j][0]) === month && (toDateStr(logData[j][1]) in tempDates)) {
+          computedCount++;
+        }
+      }
+    }
+
+    var pendingCount = Math.max(0, dataCount - computedCount);
+    return jsonResponse({
+      needsCompute: dataCount > 0 && pendingCount > 0,
+      dataCount: dataCount,
+      computedCount: computedCount,
+      pendingCount: pendingCount
+    });
+  } catch (err) {
+    return jsonResponse({error: err.message});
+  }
+}
+
+function computeMldoForMonth(month) {
+  if (!month) return jsonResponse({error:'月が指定されていません'});
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var ws = ss.getSheetByName('日常水質');
+    if (!ws || ws.getLastRow() <= 1) return jsonResponse({error:'日常水質シートにデータがありません'});
+
+    // 日常水質から当月の水温ディッチ値を収集
+    var data = ws.getRange(2, 1, ws.getLastRow() - 1, 32).getValues();
+    // 日付 → 水温ディッチ のマップ
+    var tempMap = {};
+    for (var i = 0; i < data.length; i++) {
+      var row = data[i];
+      if (!matchMonth(row[0], month)) continue;
+      var dateStr = toDateStr(row[3]);
+      if (!dateStr) continue;
+      var tempDitch = row[FIELD_MAP.tempDitch - 1];
+      if (tempDitch !== '' && tempDitch !== null && !isNaN(Number(tempDitch))) {
+        tempMap[dateStr] = Number(tempDitch);
+      }
+    }
+
+    // MLDO ログシートを用意（month → mldo値のキャッシュ）
+    var mldoLog = ss.getSheetByName('MLDOログ');
+    if (!mldoLog) {
+      mldoLog = ss.insertSheet('MLDOログ');
+      mldoLog.getRange(1, 1, 1, 3).setValues([['月', '日付', 'MLDO値']]);
+    }
+    var logData = mldoLog.getDataRange().getValues();
+    // 既存の当月レコードを取得
+    var existingDates = {};
+    for (var i = 1; i < logData.length; i++) {
+      if (normalizeMonth(logData[i][0]) === month) {
+        existingDates[toDateStr(logData[i][1])] = logData[i][2];
+      }
+    }
+
+    // 月内の各日付について未登録なら計算して記録
+    var newRows = [];
+    var dateKeys = Object.keys(tempMap).sort();
+    for (var j = 0; j < dateKeys.length; j++) {
+      var dk = dateKeys[j];
+      if (dk in existingDates) continue; // 既に固定値あり
+      var mldo = calcMldoBase(tempMap[dk]);
+      if (mldo === null) continue;
+      newRows.push([month, dk, mldo]);
+      existingDates[dk] = mldo;
+    }
+    if (newRows.length > 0) {
+      mldoLog.getRange(mldoLog.getLastRow() + 1, 1, newRows.length, 3).setValues(newRows);
+    }
+
+    // ===== 水質管理報告シートN列（MLDO）へ反映（加計） =====
+    // 加計テンプレ構造: Row8〜Row38 がデータ行（31日分）、A列=日付、N列(=14列目)=MLDO
+    // 数式が入ったまま、または空のセルのみ固定値で上書き（月1回固定ルール・手動修正保護）
+    var reportSheet = ss.getSheetByName('水質管理報告');
+    var writtenToReport = 0;
+    var skippedLocked = 0;
+    if (reportSheet) {
+      var dataRowStart = 8;
+      var dataRowCount = 31;
+      var mldoCol = 14; // N列
+      var dateRange = reportSheet.getRange(dataRowStart, 1, dataRowCount, 1).getValues();
+      var formulaRange = reportSheet.getRange(dataRowStart, mldoCol, dataRowCount, 1).getFormulas();
+      var valueRange = reportSheet.getRange(dataRowStart, mldoCol, dataRowCount, 1).getValues();
+      for (var k = 0; k < dataRowCount; k++) {
+        var cellDate = dateRange[k][0];
+        if (!cellDate) continue;
+        var cellDateStr = '';
+        if (cellDate instanceof Date) {
+          cellDateStr = toDateStr(cellDate);
+        } else if (typeof cellDate === 'string' && cellDate.length > 0) {
+          // 文字列形式の日付（例: "2026-04-01" や "2026/4/1"）も対応
+          var parsed = new Date(cellDate);
+          if (!isNaN(parsed.getTime())) cellDateStr = toDateStr(parsed);
+          else cellDateStr = String(cellDate);
+        }
+        if (!cellDateStr || !(cellDateStr in existingDates)) continue;
+
+        var hasFormula = formulaRange[k][0] && formulaRange[k][0].toString().indexOf('=') === 0;
+        var curVal = valueRange[k][0];
+        var isEmpty = (curVal === '' || curVal === null || curVal === undefined);
+
+        if (hasFormula || isEmpty) {
+          reportSheet.getRange(dataRowStart + k, mldoCol).setValue(existingDates[cellDateStr]);
+          writtenToReport++;
+        } else {
+          // 既に固定値あり → 月1回ルール・手動修正保護のため上書きしない
+          skippedLocked++;
+        }
+      }
+    }
+
+    return jsonResponse({
+      status: 'ok',
+      month: month,
+      totalDates: dateKeys.length,
+      newlyComputed: newRows.length,
+      writtenToReport: writtenToReport,
+      skippedLocked: skippedLocked,
+      reportSheetFound: !!reportSheet,
+      values: existingDates
+    });
+  } catch (err) {
+    return jsonResponse({error: err.message});
+  }
+}
+
+// ===== 祝日リスト =====
+
+// 祝日リストシートを初期化（初回のみ手動実行）
+// 既存テンプレの祝日リストをコピーするセットアップ関数
+function setupHolidays() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('祝日リスト');
+  if (sheet) {
+    return '既に「祝日リスト」シートが存在します。';
+  }
+  sheet = ss.insertSheet('祝日リスト');
+  // ヘッダー
+  sheet.getRange(1, 1, 2, 2).setValues([
+    ['祝日一覧', ''],
+    ['日付', '名称']
+  ]);
+  sheet.getRange(1, 1).setFontWeight('bold');
+  sheet.getRange(2, 1, 1, 2).setFontWeight('bold').setBackground('#e0f2e9');
+
+  // 初期データ（2025〜2028 日本の祝日）
+  var holidays = [
+    ['2025-04-29', '昭和の日'],
+    ['2025-05-03', '憲法記念日'],
+    ['2025-05-04', 'みどりの日'],
+    ['2025-05-05', 'こどもの日'],
+    ['2025-05-06', '振替休日'],
+    ['2025-07-21', '海の日'],
+    ['2025-08-11', '山の日'],
+    ['2025-09-15', '敬老の日'],
+    ['2025-09-23', '秋分の日'],
+    ['2025-10-13', 'スポーツの日'],
+    ['2025-11-03', '文化の日'],
+    ['2025-11-23', '勤労感謝の日'],
+    ['2025-11-24', '振替休日'],
+    ['2026-01-01', '元日'],
+    ['2026-01-02', '振替休日'],
+    ['2026-01-12', '成人の日'],
+    ['2026-02-11', '建国記念の日'],
+    ['2026-02-23', '天皇誕生日'],
+    ['2026-03-20', '春分の日'],
+    ['2026-04-29', '昭和の日'],
+    ['2026-05-03', '憲法記念日'],
+    ['2026-05-04', 'みどりの日'],
+    ['2026-05-05', 'こどもの日'],
+    ['2026-05-06', '振替休日'],
+    ['2026-07-20', '海の日'],
+    ['2026-08-11', '山の日'],
+    ['2026-09-21', '敬老の日'],
+    ['2026-09-23', '秋分の日'],
+    ['2026-10-12', 'スポーツの日'],
+    ['2026-11-03', '文化の日'],
+    ['2026-11-23', '勤労感謝の日'],
+    ['2027-01-01', '元日'],
+    ['2027-01-11', '成人の日'],
+    ['2027-02-11', '建国記念の日'],
+    ['2027-02-23', '天皇誕生日'],
+    ['2027-03-21', '春分の日'],
+    ['2027-03-22', '振替休日'],
+    ['2027-04-29', '昭和の日'],
+    ['2027-05-03', '憲法記念日'],
+    ['2027-05-04', 'みどりの日'],
+    ['2027-05-05', 'こどもの日'],
+    ['2027-07-19', '海の日'],
+    ['2027-08-11', '山の日'],
+    ['2027-09-20', '敬老の日'],
+    ['2027-09-23', '秋分の日'],
+    ['2027-10-11', 'スポーツの日'],
+    ['2027-11-03', '文化の日'],
+    ['2027-11-23', '勤労感謝の日'],
+    ['2028-01-01', '元日'],
+    ['2028-01-10', '成人の日'],
+    ['2028-02-11', '建国記念の日'],
+    ['2028-02-23', '天皇誕生日'],
+    ['2028-03-20', '春分の日'],
+    ['2028-04-29', '昭和の日'],
+    ['2028-05-03', '憲法記念日'],
+    ['2028-05-04', 'みどりの日'],
+    ['2028-05-05', 'こどもの日'],
+    ['2028-07-17', '海の日'],
+    ['2028-08-11', '山の日'],
+    ['2028-09-18', '敬老の日'],
+    ['2028-09-22', '秋分の日'],
+    ['2028-10-09', 'スポーツの日'],
+    ['2028-11-03', '文化の日'],
+    ['2028-11-23', '勤労感謝の日']
+  ];
+  // 日付を文字列→Dateに変換して書き込む
+  var rows = holidays.map(function(h) {
+    var parts = h[0].split('-').map(Number);
+    return [new Date(parts[0], parts[1] - 1, parts[2]), h[1]];
+  });
+  sheet.getRange(3, 1, rows.length, 2).setValues(rows);
+  sheet.getRange(3, 1, rows.length, 1).setNumberFormat('yyyy-mm-dd');
+  sheet.setColumnWidth(1, 120);
+  sheet.setColumnWidth(2, 200);
+
+  return '「祝日リスト」シートを作成しました（' + rows.length + '件）。必要に応じて編集してください。';
+}
+
+// 祝日リストを取得（API）
+function getHolidays() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName('祝日リスト');
+    if (!sheet) return jsonResponse({holidays: []});
+    var lastRow = sheet.getLastRow();
+    if (lastRow < 3) return jsonResponse({holidays: []});
+    var data = sheet.getRange(3, 1, lastRow - 2, 2).getValues();
+    var result = [];
+    for (var i = 0; i < data.length; i++) {
+      var d = data[i][0];
+      if (!d) continue;
+      if (d instanceof Date) {
+        var y = d.getFullYear();
+        var m = ('0' + (d.getMonth() + 1)).slice(-2);
+        var day = ('0' + d.getDate()).slice(-2);
+        result.push({date: y + '-' + m + '-' + day, name: data[i][1] || ''});
+      }
+    }
+    return jsonResponse({holidays: result});
+  } catch (err) {
+    return jsonResponse({error: err.message});
+  }
+}
+
+// ===== 認証システム =====
+
+// 認証が不要なアクション（ログイン前でも叩ける）
+var PUBLIC_ACTIONS = { 'ping':1, 'login':1, 'verifyToken':1 };
+
+// ユーザー管理シートの初期化（初回のみ手動実行）
+function setupAuth() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('ユーザー管理');
+  if (sheet) {
+    return 'すでに「ユーザー管理」シートは存在します。';
+  }
+  sheet = ss.insertSheet('ユーザー管理');
+  sheet.getRange(1, 1, 1, 6).setValues([['ID', 'パスワードハッシュ', '氏名', '有効', '最終ログイン', '備考']]);
+  sheet.getRange(1, 1, 1, 6).setFontWeight('bold').setBackground('#e0f2e9');
+  sheet.setColumnWidth(1, 120);
+  sheet.setColumnWidth(2, 300);
+  sheet.setColumnWidth(3, 150);
+  sheet.setColumnWidth(4, 70);
+  sheet.setColumnWidth(5, 180);
+  sheet.setColumnWidth(6, 200);
+  // 管理者の仮登録（パスワードは別途 setAdminPassword() で設定）
+  sheet.getRange(2, 1, 1, 6).setValues([['cpkanri', '', '管理者', true, '', '初期管理者（setAdminPassword()でパスワード設定）']]);
+
+  // ソルトを ScriptProperties に生成（なければ）
+  var props = PropertiesService.getScriptProperties();
+  if (!props.getProperty('AUTH_SALT')) {
+    var salt = Utilities.getUuid() + '-' + new Date().getTime();
+    props.setProperty('AUTH_SALT', salt);
+  }
+  return '「ユーザー管理」シートを作成しました。次に setAdminPassword("任意のパスワード") を実行してください。';
+}
+
+// 管理者のパスワード設定（初回・再設定用）
+// スクリプトエディタで setAdminPassword("YourPassword123") のように実行
+function setAdminPassword(password) {
+  if (!password || password.length < 6) {
+    return 'パスワードは6文字以上を指定してください。';
+  }
+  return setUserPassword('cpkanri', password);
+}
+
+// 任意ユーザーのパスワード設定（管理用）
+function setUserPassword(userId, password) {
+  if (!userId || !password || password.length < 6) {
+    return 'IDとパスワード（6文字以上）を指定してください。';
+  }
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('ユーザー管理');
+  if (!sheet) return 'ユーザー管理シートがありません。setupAuth() を先に実行してください。';
+  var data = sheet.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0]) === userId) {
+      var hash = hashPassword(password);
+      sheet.getRange(i + 1, 2).setValue(hash);
+      return 'ユーザー「' + userId + '」のパスワードを設定しました。';
+    }
+  }
+  return 'ユーザー「' + userId + '」が見つかりません。';
+}
+
+// パスワードハッシュ化（SHA-256 + salt）
+function hashPassword(password) {
+  var salt = PropertiesService.getScriptProperties().getProperty('AUTH_SALT') || 'default-salt';
+  var raw = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, password + salt, Utilities.Charset.UTF_8);
+  // バイト配列 → hex
+  var hex = '';
+  for (var i = 0; i < raw.length; i++) {
+    var b = raw[i] & 0xff;
+    hex += ('0' + b.toString(16)).slice(-2);
+  }
+  return hex;
+}
+
+// ログイン処理（ID/パスワード検証 → トークン発行）
+function login(data) {
+  var userId = data.userId;
+  var password = data.password;
+  if (!userId || !password) return jsonResponse({error:'IDとパスワードを入力してください'});
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('ユーザー管理');
+  if (!sheet) return jsonResponse({error:'認証システム未初期化（管理者に連絡してください）'});
+  var rows = sheet.getDataRange().getValues();
+  var hash = hashPassword(password);
+  for (var i = 1; i < rows.length; i++) {
+    var id = String(rows[i][0]);
+    var storedHash = String(rows[i][1]);
+    var name = String(rows[i][2] || '');
+    var enabled = rows[i][3];
+    if (id !== userId) continue;
+    if (!enabled || enabled === false || String(enabled).toLowerCase() === 'false') {
+      return jsonResponse({error:'このアカウントは無効化されています'});
+    }
+    if (!storedHash || storedHash !== hash) {
+      return jsonResponse({error:'IDまたはパスワードが正しくありません'});
+    }
+    // 最終ログイン更新
+    sheet.getRange(i + 1, 5).setValue(new Date());
+    // トークン発行（30日）
+    var token = issueToken(userId);
+    return jsonResponse({
+      status: 'ok',
+      token: token.token,
+      expires: token.expires,
+      userId: userId,
+      name: name
+    });
+  }
+  return jsonResponse({error:'IDまたはパスワードが正しくありません'});
+}
+
+// トークン発行（30日有効）
+function issueToken(userId) {
+  var props = PropertiesService.getScriptProperties();
+  var token = Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, '');
+  var now = new Date().getTime();
+  var expires = now + 30 * 24 * 60 * 60 * 1000; // 30日
+  // トークン → {userId, expires} を ScriptProperties に保存
+  var tokenKey = 'TK_' + token;
+  props.setProperty(tokenKey, JSON.stringify({userId: userId, expires: expires}));
+  // 古い期限切れトークンを掃除（月1回程度でよいが念のため毎回軽く）
+  try { cleanupExpiredTokens(); } catch (e) {}
+  return { token: token, expires: expires };
+}
+
+// 期限切れトークンの掃除
+function cleanupExpiredTokens() {
+  var props = PropertiesService.getScriptProperties();
+  var all = props.getProperties();
+  var now = new Date().getTime();
+  var removed = 0;
+  for (var key in all) {
+    if (key.indexOf('TK_') !== 0) continue;
+    try {
+      var obj = JSON.parse(all[key]);
+      if (obj.expires < now) {
+        props.deleteProperty(key);
+        removed++;
+      }
+    } catch (e) { props.deleteProperty(key); }
+  }
+  return removed;
+}
+
+// トークン検証（有効なら userId を返す、無効なら null）
+function verifyToken(token) {
+  if (!token) return null;
+  var props = PropertiesService.getScriptProperties();
+  var raw = props.getProperty('TK_' + token);
+  if (!raw) return null;
+  try {
+    var obj = JSON.parse(raw);
+    if (obj.expires < new Date().getTime()) {
+      props.deleteProperty('TK_' + token);
+      return null;
+    }
+    // ユーザーがまだ「有効」かを毎回チェック（退職時の即時失効）
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName('ユーザー管理');
+    if (!sheet) return null;
+    var rows = sheet.getDataRange().getValues();
+    for (var i = 1; i < rows.length; i++) {
+      if (String(rows[i][0]) === obj.userId) {
+        var enabled = rows[i][3];
+        if (!enabled || enabled === false || String(enabled).toLowerCase() === 'false') {
+          props.deleteProperty('TK_' + token);
+          return null;
+        }
+        return obj.userId;
+      }
+    }
+    // ユーザーが削除されていた場合
+    props.deleteProperty('TK_' + token);
+    return null;
+  } catch (e) { return null; }
+}
+
+// ログアウト（トークン無効化）
+function logout(data) {
+  var token = data && data.token;
+  if (token) {
+    PropertiesService.getScriptProperties().deleteProperty('TK_' + token);
+  }
+  return jsonResponse({status:'ok'});
+}
+
+// トークン検証API（クライアントが起動時に叩く）
+function verifyTokenApi(token) {
+  var userId = verifyToken(token);
+  if (userId) return jsonResponse({valid:true, userId:userId});
+  return jsonResponse({valid:false});
+}
+
+// 認証ゲート：アクションが認証必須かチェック
+function requireAuth(action, token) {
+  if (PUBLIC_ACTIONS[action]) return null; // 公開アクション
+  var userId = verifyToken(token);
+  if (!userId) return jsonResponse({error:'認証が必要です', authRequired:true});
+  return null; // 認証OK
+}
+
+function doGet(e) {
+  try {
+    var a = e.parameter.action;
+    var token = e.parameter.token || '';
+    var authFail = requireAuth(a, token);
+    if (authFail) return authFail;
+
+    if (a==='ping') return jsonResponse({status:'ok',message:'上殿週報API稼働中'});
+    if (a==='verifyToken') return verifyTokenApi(token);
+    if (a==='getData') return getData(e.parameter.month);
+    if (a==='getAllData') return getAllData(e.parameter.month);
+    if (a==='exportExcel') return exportExcel(e.parameter.month,e.parameter.templateId);
+    if (a==='computeMldo') return computeMldoForMonth(e.parameter.month);
+    if (a==='checkMldo') return checkMldoStatus(e.parameter.month);
+    if (a==='getHolidays') return getHolidays();
+    return jsonResponse({error:'不明なアクション'});
+  } catch(err) { return jsonResponse({error:err.message}); }
+}
+function doPost(e) {
+  try {
+    var data=JSON.parse(e.postData.contents), a=data.action;
+    var token = data.token || '';
+    var authFail = requireAuth(a, token);
+    if (authFail) return authFail;
+
+    if (a==='login') return login(data);
+    if (a==='logout') return logout(data);
+    if (a==='saveWeek') return saveWeekData(data);
+    if (a==='saveAll') return saveAllData(data);
+    if (a==='saveEquipment') return saveEquipmentData(data);
+    if (a==='saveElectrical') return saveElectricalData(data);
+    if (a==='saveMechanical') return saveMechanicalData(data);
+    if (a==='saveEverything') return saveEverything(data);
+    return jsonResponse({error:'不明なアクション'});
+  } catch(err) { return jsonResponse({error:err.message}); }
+}
+
+// ===== 日常水質 =====
+function getData(month) {
+  if(!month) return jsonResponse({error:'月が指定されていません'});
+  var ss=SpreadsheetApp.getActiveSpreadsheet(),sheet=ss.getSheetByName('日常水質'),lr=sheet.getLastRow();
+  if(lr<=1) return jsonResponse({data:[],month:month});
+  var vals=sheet.getRange(2,1,lr-1,32).getValues(),result=[];
+  for(var i=0;i<vals.length;i++){var row=vals[i]; if(matchMonth(row[0],month)){
+    var rec={month:month,week:row[1],day:row[2],date:row[3]};
+    for(var f in FIELD_MAP){var v=row[FIELD_MAP[f]-1];rec[f]=(v===''||v===null)?null:v;} rec.updatedAt=row[27]; result.push(rec);
+  }} return jsonResponse({data:result,month:month});
+}
+function saveWeekData(data) {
+  var month=data.month,week=data.week,days=data.days;
+  if(!month||!week||!days) return jsonResponse({error:'パラメータ不足'});
+  var ss=SpreadsheetApp.getActiveSpreadsheet(),sheet=ss.getSheetByName('日常水質'),now=new Date(),cnt=0;
+  for(var dc in days){var dd=days[dc]; if(!dd)continue; var dn=DAY_NAMES[dc]; if(!dn)continue;
+    var ri=findRow(sheet,month,week,dn),rv=[month,parseInt(week),dn,toDateStr(dd.date)||''];
+    for(var f in FIELD_MAP){var v=dd[f];rv.push(v!=null&&v!=undefined&&v!==''?v:'');} rv.push(now);
+    if(ri>0){sheet.getRange(ri,1,1,rv.length).setValues([rv]);}else{sheet.appendRow(rv);} cnt++;
+  } sortSheet(sheet); return jsonResponse({status:'ok',message:'水質'+cnt+'日分保存',savedCount:cnt});
+}
+function saveAllData(data) {
+  var month=data.month,weeks=data.weeks; if(!month||!weeks) return jsonResponse({error:'パラメータ不足'});
+  var t=0; for(var wn in weeks){var r=saveWeekData({month:month,week:parseInt(wn),startDate:data.startDate,days:weeks[wn]});
+    var p=JSON.parse(r.getContent()); if(p.savedCount) t+=p.savedCount;}
+  return jsonResponse({status:'ok',message:'水質'+t+'日分保存',savedCount:t});
+}
+
+// ===== 機器運転時間 =====
+function saveEquipmentData(data) {
+  var month=data.month,eq=data.equipment; if(!month||!eq) return jsonResponse({error:'パラメータ不足'});
+  var ss=SpreadsheetApp.getActiveSpreadsheet(),sheet=ss.getSheetByName('機器運転時間');
+  if(!sheet) return jsonResponse({error:'シートなし'}); var now=new Date(),cnt=0;
+  for(var wn in eq){var wd=eq[wn]; for(var e=0;e<EQUIP_NAMES.length;e++){
+    var ek=EQUIP_NAMES[e],el=EQUIP_LABELS[e],ed=wd[ek]; if(!ed)continue;
+    var ri=findEquipRow(sheet,month,parseInt(wn),el);
+    var rv=[month,parseInt(wn),el,ed.mon!=null?ed.mon:'',ed.tue!=null?ed.tue:'',ed.wed!=null?ed.wed:'',ed.thu!=null?ed.thu:'',ed.fri!=null?ed.fri:'',now];
+    if(ri>0){sheet.getRange(ri,1,1,rv.length).setValues([rv]);}else{sheet.appendRow(rv);} cnt++;
+  }} return jsonResponse({status:'ok',message:'機器'+cnt+'件保存',savedCount:cnt});
+}
+function findEquipRow(sheet,month,week,label) {
+  var lr=sheet.getLastRow(); if(lr<=1) return -1;
+  var d=sheet.getRange(2,1,lr-1,3).getValues();
+  for(var i=0;i<d.length;i++){if(matchMonth(d[i][0],month)&&d[i][1]===week&&d[i][2]===label) return i+2;} return -1;
+}
+
+// ===== 電気設備 =====
+function saveElectricalData(data) {
+  var month=data.month,el=data.electrical; if(!month||!el) return jsonResponse({error:'パラメータ不足'});
+  var ss=SpreadsheetApp.getActiveSpreadsheet(),sheet=ss.getSheetByName('電気設備');
+  if(!sheet) return jsonResponse({error:'シートなし'}); var now=new Date(),cnt=0;
+  for(var wn in el){var wd=el[wn]; for(var dc in wd){var dd=wd[dc]; if(!dd)continue;
+    var dn=DAY_NAMES[dc]; if(!dn)continue; var ri=findRow(sheet,month,parseInt(wn),dn);
+    var rv=[month,parseInt(wn),dn]; for(var f=0;f<ELEC_FIELDS.length;f++){var v=dd[ELEC_FIELDS[f]];rv.push(v!=null&&v!=undefined&&v!==''?v:'');} rv.push(now);
+    if(ri>0){sheet.getRange(ri,1,1,rv.length).setValues([rv]);}else{sheet.appendRow(rv);} cnt++;
+  }} return jsonResponse({status:'ok',message:'電気'+cnt+'日分保存',savedCount:cnt});
+}
+
+// ===== 機械設備 =====
+function saveMechanicalData(data) {
+  var month=data.month,mech=data.mechanical; if(!month||!mech) return jsonResponse({error:'パラメータ不足'});
+  var ss=SpreadsheetApp.getActiveSpreadsheet(),sheet=ss.getSheetByName('機械設備');
+  if(!sheet) return jsonResponse({error:'シートなし'}); var now=new Date(),cnt=0;
+  for(var wn in mech){var wd=mech[wn]; for(var dc in wd){var dd=wd[dc]; if(!dd)continue;
+    var dn=DAY_NAMES[dc]; if(!dn)continue; var ri=findRow(sheet,month,parseInt(wn),dn);
+    var js=JSON.stringify(dd),rv=[month,parseInt(wn),dn,js,now];
+    if(ri>0){sheet.getRange(ri,1,1,rv.length).setValues([rv]);}else{sheet.appendRow(rv);} cnt++;
+  }} return jsonResponse({status:'ok',message:'機械'+cnt+'日分保存',savedCount:cnt});
+}
+
+// ===== 全データ一括保存 =====
+function saveEverything(data) {
+  var results=[],month=data.month;
+  if(data.weeks){var r=saveAllData({month:month,startDate:data.startDate,weeks:data.weeks});results.push(JSON.parse(r.getContent()).message);}
+  if(data.equipment){var r=saveEquipmentData({month:month,equipment:data.equipment});results.push(JSON.parse(r.getContent()).message);}
+  if(data.electrical){var r=saveElectricalData({month:month,electrical:data.electrical});results.push(JSON.parse(r.getContent()).message);}
+  if(data.mechanical){var r=saveMechanicalData({month:month,mechanical:data.mechanical});results.push(JSON.parse(r.getContent()).message);}
+  return jsonResponse({status:'ok',message:results.join('、')});
+}
+
+// ===== 全データ取得 =====
+function getAllData(month) {
+  if(!month) return jsonResponse({error:'月が指定されていません'});
+  var ss=SpreadsheetApp.getActiveSpreadsheet(),result={month:month,water:[],equipment:[],electrical:[],mechanical:[]};
+  var ws=ss.getSheetByName('日常水質');
+  if(ws&&ws.getLastRow()>1){var v=ws.getRange(2,1,ws.getLastRow()-1,32).getValues();
+    for(var i=0;i<v.length;i++){if(matchMonth(v[i][0],month)){var r={week:v[i][1],day:v[i][2],date:v[i][3]};
+      for(var f in FIELD_MAP){var val=v[i][FIELD_MAP[f]-1];r[f]=(val===''||val===null)?null:val;} result.water.push(r);}}}
+  var es=ss.getSheetByName('機器運転時間');
+  if(es&&es.getLastRow()>1){var v=es.getRange(2,1,es.getLastRow()-1,9).getValues();
+    for(var i=0;i<v.length;i++){if(matchMonth(v[i][0],month)){result.equipment.push({week:v[i][1],name:v[i][2],mon:v[i][3],tue:v[i][4],wed:v[i][5],thu:v[i][6],fri:v[i][7]});}}}
+  var els=ss.getSheetByName('電気設備');
+  if(els&&els.getLastRow()>1){var v=els.getRange(2,1,els.getLastRow()-1,34).getValues();
+    for(var i=0;i<v.length;i++){if(matchMonth(v[i][0],month)){var r={week:v[i][1],day:v[i][2]};
+      for(var f=0;f<ELEC_FIELDS.length;f++){var val=v[i][f+3];r[ELEC_FIELDS[f]]=(val===''||val===null)?null:val;} result.electrical.push(r);}}}
+  var ms=ss.getSheetByName('機械設備');
+  if(ms&&ms.getLastRow()>1){var v=ms.getRange(2,1,ms.getLastRow()-1,5).getValues();
+    for(var i=0;i<v.length;i++){if(matchMonth(v[i][0],month)){var md={};try{md=JSON.parse(v[i][3]);}catch(e){}
+      result.mechanical.push({week:v[i][1],day:v[i][2],data:md});}}}
+  return jsonResponse(result);
+}
+
+// ===== Excel出力（全シート対応） =====
+function exportExcel(month, templateId) {
+  if(!month) return jsonResponse({error:'月が指定されていません'});
+  if(!templateId){var ss=SpreadsheetApp.getActiveSpreadsheet(),st=ss.getSheetByName('設定');
+    if(st){var sd=st.getDataRange().getValues();for(var i=0;i<sd.length;i++){if(sd[i][0]==='テンプレートID'){templateId=sd[i][1];break;}}}}
+  if(!templateId) return jsonResponse({error:'テンプレートIDなし'});
+
+  try {
+    var tf=DriveApp.getFileById(templateId),ml=month.replace('-','年')+'月',nf='上殿'+ml.substring(5);
+    var cf=tf.makeCopy(nf),nid=cf.getId(),wb=SpreadsheetApp.openById(nid);
+    var ss2=SpreadsheetApp.getActiveSpreadsheet();
+    var sheets=wb.getSheets();
+
+    // ===== 日常水質 =====
+    var wSheet=sheets[0],ds=ss2.getSheetByName('日常水質');
+    if(ds&&ds.getLastRow()>1){
+      var ad=ds.getRange(2,1,ds.getLastRow()-1,32).getValues();
+      var md=ad.filter(function(r){return matchMonth(r[0],month);});
+      var w1m=md.find(function(r){return r[1]===1&&r[2]==='月';});
+      if(w1m&&w1m[3]) wSheet.getRange(3,9).setValue(new Date(w1m[3]));
+      for(var r=0;r<md.length;r++){var row=md[r],wc=WEEK_CONFIG[row[1]];if(!wc)continue;
+        var dc=DAY_REVERSE[row[2]];if(!dc)continue;var col=DAY_COLUMNS[dc];if(!col)continue;
+        for(var f in ITEM_OFFSETS){var v=row[FIELD_MAP[f]-1];if(v!==''&&v!==null&&v!==undefined) wSheet.getRange(wc.dataRow+ITEM_OFFSETS[f],col).setValue(v);}
+        var ins=row[FIELD_MAP.inspector-1]; if(ins) wSheet.getRange(wc.inspectorRow,col).setValue(ins);
+      }
+    }
+
+    // ===== 機器運転時間 =====
+    var eqSheet=null; for(var s=0;s<sheets.length;s++){if(sheets[s].getName().indexOf('機器運転')>=0){eqSheet=sheets[s];break;}}
+    if(eqSheet){var eqDs=ss2.getSheetByName('機器運転時間');
+      if(eqDs&&eqDs.getLastRow()>1){var eqD=eqDs.getRange(2,1,eqDs.getLastRow()-1,9).getValues();
+        var eqM=eqD.filter(function(r){return matchMonth(r[0],month);});
+        for(var r=0;r<eqM.length;r++){var row=eqM[r],wn=row[1],el=row[2],ws2=EQUIP_WEEK_START[wn];if(!ws2)continue;
+          var ei=EQUIP_LABELS.indexOf(el);if(ei<0)continue;var tr=ws2+ei;
+          var dk=['mon','tue','wed','thu','fri'];
+          for(var d=0;d<dk.length;d++){var v=row[3+d];if(v!==''&&v!==null&&v!==undefined) eqSheet.getRange(tr,4+d).setValue(v);}
+        }
+      }
+    }
+
+    // ===== 電気設備 =====
+    var elSheet=null; for(var s=0;s<sheets.length;s++){if(sheets[s].getName().indexOf('電気設備')>=0){elSheet=sheets[s];break;}}
+    if(elSheet){var elDs=ss2.getSheetByName('電気設備');
+      if(elDs&&elDs.getLastRow()>1){var elD=elDs.getRange(2,1,elDs.getLastRow()-1,34).getValues();
+        var elM=elD.filter(function(r){return matchMonth(r[0],month);});
+        for(var r=0;r<elM.length;r++){var row=elM[r],wn=row[1],dn=row[2],dc=DAY_REVERSE[dn];if(!dc)continue;
+          var ws3=ELEC_WEEK_START[wn];if(!ws3)continue;var col=ELEC_DAY_COL[dc];if(!col)continue;
+          for(var f in ELEC_OFFSETS){var fi=ELEC_FIELDS.indexOf(f);if(fi<0)continue;var v=row[3+fi];
+            if(v!==''&&v!==null&&v!==undefined) elSheet.getRange(ws3+ELEC_OFFSETS[f],col).setValue(v);}
+        }
+      }
+    }
+
+    // ===== 機械設備 =====
+    var mechSheet1=null,mechSheet2=null;
+    for(var s=0;s<sheets.length;s++){
+      var sn=sheets[s].getName();
+      if(sn.indexOf('機械設備')>=0||sn.indexOf('機械')>=0){
+        if(!mechSheet1) mechSheet1=sheets[s]; // 日常機械設備シート
+      }
+    }
+    if(mechSheet1){var mechDs=ss2.getSheetByName('機械設備');
+      if(mechDs&&mechDs.getLastRow()>1){var mechD=mechDs.getRange(2,1,mechDs.getLastRow()-1,5).getValues();
+        var mechM=mechD.filter(function(r){return matchMonth(r[0],month);});
+        for(var r=0;r<mechM.length;r++){
+          var row=mechM[r],wn=row[1],dn=row[2],dc=DAY_REVERSE[dn];if(!dc)continue;
+          var mechData={}; try{mechData=JSON.parse(row[3]);}catch(e){continue;}
+          var wk=MECH_WEEK[wn]; if(!wk) continue;
+          var col=MECH_DAY_COL[dc]; if(!col) continue;
+          // 1/2のデータを書き込み
+          for(var key in MECH_1_MAP){
+            if(mechData[key]!==undefined&&mechData[key]!==null&&mechData[key]!==''){
+              var targetRow=MECH_1_MAP[key]+wk.p1;
+              mechSheet1.getRange(targetRow,col).setValue(mechData[key]);
+            }
+          }
+          // 2/2のデータを書き込み
+          for(var key in MECH_2_MAP){
+            if(mechData[key]!==undefined&&mechData[key]!==null&&mechData[key]!==''){
+              var targetRow=MECH_2_MAP[key]+wk.p2-63; // 2/2の行はp2基準に調整
+              mechSheet1.getRange(targetRow,col).setValue(mechData[key]);
+            }
+          }
+        }
+      }
+    }
+
+    SpreadsheetApp.flush();
+    var eu='https://docs.google.com/spreadsheets/d/'+nid+'/export?format=xlsx';
+    var tk=ScriptApp.getOAuthToken(),rsp=UrlFetchApp.fetch(eu,{headers:{'Authorization':'Bearer '+tk}});
+    var bl=rsp.getBlob();bl.setName(nf+'.xlsx');var ef=DriveApp.createFile(bl);
+    DriveApp.getFileById(nid).setTrashed(true);
+    return jsonResponse({status:'ok',message:ml+'のExcelファイルを生成しました',fileId:ef.getId(),fileUrl:ef.getUrl(),downloadUrl:'https://drive.google.com/uc?export=download&id='+ef.getId()});
+  } catch(err) { return jsonResponse({error:'Excel生成エラー: '+err.message}); }
+}
+
+// ===== 共通関数 =====
+function findRow(sheet,month,week,dayName) {
+  var lr=sheet.getLastRow();if(lr<=1) return -1;
+  var d=sheet.getRange(2,1,lr-1,3).getValues();
+  for(var i=0;i<d.length;i++){if(matchMonth(d[i][0],month)&&d[i][1]===parseInt(week)&&d[i][2]===dayName) return i+2;} return -1;
+}
+function sortSheet(sheet) {
+  var lr=sheet.getLastRow();if(lr<=2)return;
+  sheet.getRange(2,1,lr-1,sheet.getLastColumn()).sort([{column:1,ascending:true},{column:2,ascending:true},{column:3,ascending:true}]);
+}
+function jsonResponse(obj) { return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON); }
+function authorizeAll() { var f=DriveApp.getFileById('1sSvOu617yCabXjFLh39k8EpfhGAzP_Y6');f.makeCopy('テスト');SpreadsheetApp.getActiveSpreadsheet();UrlFetchApp.fetch('https://www.google.com');Logger.log('全権限OK'); }
+function __tempSetupHolidays() {
+       Logger.log(setupHolidays());
+     }
+     
