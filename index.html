@@ -2513,75 +2513,173 @@ function pruneOldMonthData(currentMonth) {
   } catch (e) { return 0; }
 }
 
-function saveToStorage() {
-  function doSave() {
-    if (currentSheet === "water") saveFormToData();
-    else if (currentSheet === "equip") saveEquipFormToData();
-    else if (currentSheet === "elec") saveElecFormToData();
-    else if (currentSheet === "mech") saveMechFormToData();
-    weeklyData.targetMonth = document.getElementById("targetMonth").value || weeklyData.targetMonth;
-    // startDate はinput値ではなく対象月から常に再計算（readonly のため）
-    weeklyData.startDate = estimateStartDate(weeklyData.targetMonth);
-    localStorage.setItem(storageKey(), JSON.stringify(weeklyData));
-    const inspEl = document.querySelector('[data-field="inspector"]');
-    if (inspEl && inspEl.value) {
-      try { localStorage.setItem("kake_last_inspector", inspEl.value); } catch(e) {}
-    }
-    if (weeklyData.targetMonth) {
-      try { localStorage.setItem("kake_current_month", weeklyData.targetMonth); } catch(e) {}
+// ===== 共通ヘルパー: ネットワークエラー判定 =====
+// fetch 系の真のネットワークエラーのみ true を返す。
+// QuotaExceededError 等の localStorage 起因エラーで誤って「オフライン」表示するのを防ぐ。
+function isNetworkError(e) {
+  if (!e) return false;
+  const name = e.name || "";
+  const msg = (e.message || "").toLowerCase();
+  return name === "AbortError" ||
+         (name === "TypeError" && msg.includes("fetch")) ||
+         msg.includes("networkerror") ||
+         msg.includes("load failed") ||
+         msg.includes("failed to fetch");
+}
+
+// ===== 横断ストレージ管理 =====
+// 4アプリ(吉和/上殿/柴木/加計)が cpkanri.github.io 配下で localStorage 5MB を共有するため、
+// 容量超過時は全アプリ横断で最古月のデータを削除する。
+// 移行期間中は旧プレフィックス(uedono_/shibaki_)も削除対象に含める。
+const STORAGE_APP_PREFIXES = [
+  { prefix: "yoshiwa_",  label: "吉和" },
+  { prefix: "kamitono_", label: "上殿" },
+  { prefix: "uedono_",   label: "上殿(旧)" },
+  { prefix: "shiwagi_",  label: "柴木" },
+  { prefix: "shibaki_",  label: "柴木(旧)" },
+  { prefix: "kake_",     label: "加計" }
+];
+const STORAGE_MONTH_KEY_TYPES = [
+  "weekly_",       // 週報データ (全アプリ)
+  "aeration_",     // エアレーション (吉和)
+  "mlss_return_"   // MLSS返送汚泥 (吉和)
+];
+
+function isQuotaErrorCommon(e) {
+  if (!e) return false;
+  const name = e.name || "";
+  const code = e.code;
+  const msg = String(e.message || "");
+  return name === "QuotaExceededError" ||
+         name === "NS_ERROR_DOM_QUOTA_REACHED" ||
+         code === 22 || code === 1014 ||
+         /quota/i.test(msg);
+}
+
+function listAllMonthKeys() {
+  const items = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (!k) continue;
+    for (const app of STORAGE_APP_PREFIXES) {
+      if (!k.startsWith(app.prefix)) continue;
+      const remainder = k.substring(app.prefix.length);
+      for (const type of STORAGE_MONTH_KEY_TYPES) {
+        if (!remainder.startsWith(type)) continue;
+        const ym = remainder.substring(type.length);
+        if (!/^\d{4}-\d{2}$/.test(ym)) break;
+        let bytes = 0;
+        try { bytes = (localStorage.getItem(k) || "").length + k.length; } catch(e) {}
+        items.push({ app: app.label, prefix: app.prefix, type, ym, key: k, bytes });
+        break;
+      }
+      break;
     }
   }
-  function isQuotaError(e) {
-    return !!e && (
-      e.name === 'QuotaExceededError' ||
-      e.code === 22 || e.code === 1014 ||
-      /quota/i.test(String(e.message || ''))
-    );
+  return items;
+}
+
+function getProtectedMonthSet() {
+  const protectedSet = new Set();
+  for (const app of STORAGE_APP_PREFIXES) {
+    const cur = localStorage.getItem(app.prefix + "current_month");
+    if (cur && /^\d{4}-\d{2}$/.test(cur)) {
+      protectedSet.add(app.prefix + cur);
+      const ym = cur.split("-");
+      const y = parseInt(ym[0], 10), m = parseInt(ym[1], 10);
+      const prevY = m === 1 ? y - 1 : y;
+      const prevM = m === 1 ? 12 : m - 1;
+      const prev = prevY + "-" + String(prevM).padStart(2, "0");
+      protectedSet.add(app.prefix + prev);
+    }
+  }
+  return protectedSet;
+}
+
+function recordPruneHistory(deletedItems) {
+  if (!deletedItems || deletedItems.length === 0) return;
+  try {
+    const HISTORY_KEY = "kake_save_history";
+    let history = [];
+    try {
+      const raw = localStorage.getItem(HISTORY_KEY);
+      if (raw) history = JSON.parse(raw) || [];
+    } catch(e) {}
+    const detail = deletedItems.map(it => it.app + it.ym).join(", ");
+    history.unshift({
+      ts: new Date().toISOString(),
+      type: "prune",
+      detail: "容量確保のため削除: " + detail
+    });
+    if (history.length > 50) history = history.slice(0, 50);
+    try { localStorage.setItem(HISTORY_KEY, JSON.stringify(history)); } catch(e) {}
+  } catch(e) {}
+}
+
+function safeSetItem(key, value) {
+  const deleted = [];
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      localStorage.setItem(key, value);
+      if (deleted.length > 0) {
+        recordPruneHistory(deleted);
+        try {
+          if (typeof showToast === "function") {
+            const detail = deleted.map(d => d.app + d.ym).join(", ");
+            showToast("容量確保のため削除: " + detail, "warn");
+          }
+        } catch(e) {}
+      }
+      return { ok: true, deleted };
+    } catch (e) {
+      if (!isQuotaErrorCommon(e)) return { ok: false, error: e, deleted };
+      const protectedSet = getProtectedMonthSet();
+      const candidates = listAllMonthKeys().filter(it =>
+        !protectedSet.has(it.prefix + it.ym)
+      );
+      if (candidates.length === 0) {
+        return { ok: false, error: e, deleted, quotaExhausted: true };
+      }
+      candidates.sort((a, b) => a.ym.localeCompare(b.ym));
+      const oldestYm = candidates[0].ym;
+      const toDelete = candidates.filter(it => it.ym === oldestYm);
+      toDelete.forEach(it => {
+        try {
+          localStorage.removeItem(it.key);
+          deleted.push({ app: it.app, ym: it.ym, key: it.key });
+        } catch(e2) {}
+      });
+    }
+  }
+  return { ok: false, error: new Error("retry limit exceeded"), deleted, quotaExhausted: true };
+}
+
+function saveToStorage() {
+  // フォーム状態をデータに書き戻す
+  if (currentSheet === "water") saveFormToData();
+  else if (currentSheet === "equip") saveEquipFormToData();
+  else if (currentSheet === "elec") saveElecFormToData();
+  else if (currentSheet === "mech") saveMechFormToData();
+  weeklyData.targetMonth = document.getElementById("targetMonth").value || weeklyData.targetMonth;
+  // startDate はinput値ではなく対象月から常に再計算（readonly のため）
+  weeklyData.startDate = estimateStartDate(weeklyData.targetMonth);
+
+  // 容量超過対応の safeSetItem で保存
+  const res = safeSetItem(storageKey(), JSON.stringify(weeklyData));
+  if (!res.ok) {
+    console.error('saveToStorage error:', res.error, 'quotaExhausted:', res.quotaExhausted);
+    window.__lastSaveError = res.error;
+    return false;
   }
 
-  try {
-    doSave();
-    return true;
-  } catch (e) {
-    if (!isQuotaError(e)) {
-      console.error('saveToStorage error:', e);
-      window.__lastSaveError = e;
-      return false;
-    }
-    // 段階1: 13ヶ月より古いデータを削除 + Undoスタッククリア
-    console.warn('localStorage quota exceeded - pruning old month data');
-    var pruned = pruneOldMonthData(weeklyData.targetMonth);
-    if (typeof undoStack !== "undefined" && undoStack.length) undoStack.length = 0;
-    try {
-      doSave();
-      console.log('Saved after pruning', pruned, 'old month keys');
-      return true;
-    } catch (e2) {
-      if (!isQuotaError(e2)) {
-        console.error('saveToStorage retry error:', e2);
-        window.__lastSaveError = e2;
-        return false;
-      }
-      // 段階2: 他月のキーを古い順に1つずつ削除
-      var allKeys = [];
-      for (var i = 0; i < localStorage.length; i++) {
-        var k = localStorage.key(i);
-        if (k && k.indexOf('kake_weekly_') === 0 && k !== storageKey()) allKeys.push(k);
-      }
-      allKeys.sort(); // 古い年月順（YYYY-MM 形式なので単純ソートで OK）
-      for (var j = 0; j < allKeys.length; j++) {
-        localStorage.removeItem(allKeys[j]);
-        try {
-          doSave();
-          console.warn('Saved after removing old keys:', allKeys.slice(0, j + 1));
-          return true;
-        } catch (e3) { /* 続けて削除 */ }
-      }
-      console.error('saveToStorage final failure: quota still exceeded');
-      window.__lastSaveError = e2;
-      return false;
-    }
+  const inspEl = document.querySelector('[data-field="inspector"]');
+  if (inspEl && inspEl.value) {
+    try { localStorage.setItem("kake_last_inspector", inspEl.value); } catch(e) {}
   }
+  if (weeklyData.targetMonth) {
+    try { localStorage.setItem("kake_current_month", weeklyData.targetMonth); } catch(e) {}
+  }
+  return true;
 }
 
 function loadFromStorage() {
@@ -2884,7 +2982,9 @@ async function syncFromServer() {
     setConnectionStatus(true);
     return totalSummary;
   } catch (e) {
-    setConnectionStatus(false);
+    // ネットワーク起因のエラー時のみオフライン表示する。
+    // localStorage QuotaExceededError 等は接続状態と無関係なので維持する。
+    if (isNetworkError(e)) setConnectionStatus(false);
     throw e;
   }
 }
@@ -3336,7 +3436,8 @@ function bindEvents() {
       // 水温データが増えた可能性があるのでMLDOステータスを更新
       updateMldoStatus();
     } catch (e) {
-      setConnectionStatus(false);
+      // ネットワーク起因のエラー時のみオフライン表示する
+      if (isNetworkError(e)) setConnectionStatus(false);
       const msg = e && e.message ? e.message : String(e);
       console.error('saveCurrentToServer error:', e);
       showToast("端末に" + scope + "を保存しました。サーバー送信失敗：" + msg + "（後で同期してください）", "warn");
@@ -3393,7 +3494,9 @@ function bindEvents() {
         showToast("サーバーにデータがありません", "warn");
       }
     } catch (e) {
-      setConnectionStatus(false);
+      // ネットワーク起因のエラー時のみオフライン表示する。
+      // localStorage QuotaExceededError 等の場合はサーバー接続自体は生きているので維持する。
+      if (isNetworkError(e)) setConnectionStatus(false);
       showToast("同期エラー: " + (e.message || e), "error");
     }
 
