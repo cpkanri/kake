@@ -2951,36 +2951,9 @@ async function syncFromServer() {
   try {
     const data = await loadFromServer(weeklyData.targetMonth);
 
-    // 前月・翌月もマージ（月またぎ対応）
-    const ym = (weeklyData.targetMonth || "").split("-");
-    if (ym.length === 2) {
-      const year = parseInt(ym[0], 10);
-      const month = parseInt(ym[1], 10);
-      const prevMonth = month === 1 ? (year - 1) + "-12" : year + "-" + String(month - 1).padStart(2, "0");
-      const nextMonth = month === 12 ? (year + 1) + "-01" : year + "-" + String(month + 1).padStart(2, "0");
-      try {
-        const prevData = await loadFromServer(prevMonth);
-        if (prevData) {
-          const s = mergeServerData(prevData);
-          totalSummary.water_days += s.water_days;
-          totalSummary.equipment_weeks += s.equipment_weeks;
-          totalSummary.electrical_days += s.electrical_days;
-          totalSummary.mechanical_days += s.mechanical_days;
-          if (s.merged) totalSummary.merged = true;
-        }
-      } catch (e) {}
-      try {
-        const nextData = await loadFromServer(nextMonth);
-        if (nextData) {
-          const s = mergeServerData(nextData);
-          totalSummary.water_days += s.water_days;
-          totalSummary.equipment_weeks += s.equipment_weeks;
-          totalSummary.electrical_days += s.electrical_days;
-          totalSummary.mechanical_days += s.mechanical_days;
-          if (s.merged) totalSummary.merged = true;
-        }
-      } catch (e) {}
-    }
+    // 注: 旧バージョンには前月・翌月もマージする処理があったが、
+    // 週番号(1-5)単位でデータが上書きされ、対象月のフォームに前月データが残るバグの原因になっていたため削除。
+    // 対象月のデータだけを読み込むことで、月切替時に前月データが残らないようにする。
 
     if (data && (data.weeks || data.water || data.equipment || data.electrical || data.mechanical)) {
       const s = mergeServerData(data);
@@ -3235,8 +3208,29 @@ function bindEvents() {
 
   // 対象月変更
   document.getElementById("targetMonth").addEventListener("change", (e) => {
-    saveToStorage();
     const newMonth = e.target.value;
+    const oldMonth = weeklyData.targetMonth;
+
+    // 旧月のデータを「旧月のキー」で保存してから切替える
+    // (saveToStorage() は内部で document.getElementById("targetMonth").value を読むため、
+    //  この時点では DOM が既に新月になっており、新月キーに旧月データを書き込んでしまうので使えない)
+    if (oldMonth && oldMonth !== newMonth) {
+      // フォーム入力をデータに書き戻す
+      if (currentSheet === "water") saveFormToData();
+      else if (currentSheet === "equip") saveEquipFormToData();
+      else if (currentSheet === "elec") saveElecFormToData();
+      else if (currentSheet === "mech") saveMechFormToData();
+      // 旧月のキーで明示的に保存
+      try {
+        const res = safeSetItem("kake_weekly_" + oldMonth, JSON.stringify(weeklyData));
+        if (!res || !res.ok) console.error('旧月データ保存失敗:', res && res.error);
+      } catch (err) { console.error('旧月データ保存エラー:', err); }
+    } else {
+      // 同じ月の再選択 or 初回 → 通常保存
+      saveToStorage();
+    }
+
+    // 新月のデータを localStorage からロード（無ければ完全に空のweeklyDataを構築）
     const raw = localStorage.getItem("kake_weekly_" + newMonth);
     if (raw) {
       try { weeklyData = JSON.parse(raw); } catch (err) {
