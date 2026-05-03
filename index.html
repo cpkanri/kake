@@ -1257,7 +1257,7 @@ header > .conn-status {
 
 <script>
 // ===== GAS URL =====
-const GAS_URL = 'https://script.google.com/macros/s/AKfycbxSnei499GcutvpiN5h0pKGB7l6OfVM__qEFwWmx0uFFjV2zaqgyCh5EN1fr-IGftDlMw/exec';
+const GAS_URL = 'https://script.google.com/macros/s/AKfycbziws81UVlH4A49R44U7o1pO3xUzB3NHD2ZxKTNtoCYPQS-i1ARrBVJ0EpVke74Wrdweg/exec';
 
 // ===== 認証 =====
 const AUTH_KEYS = { token: 'kake_auth_token', userId: 'kake_auth_userId', userName: 'kake_auth_userName', expires: 'kake_auth_expires' };
@@ -2717,12 +2717,19 @@ function fmtYMD(d) {
 }
 
 // 水質1週分のデータに date を注入し、nextMon → fri にキー変換して GAS 形式に揃える
+// 入力なしの日(全フィールドnull)は送信しない → 空行作成防止
 function buildWaterDaysPayload(weekIdx) {
   const sourceWeek = weeklyData.weeks[weekIdx] || {};
   const days = {};
   Object.keys(sourceWeek).forEach(appKey => {
     const src = sourceWeek[appKey];
     if (!src) return;
+    // 全フィールド空ならスキップ(date のみは行作成のトリガーにしない)
+    const hasAnyData = ALL_FIELDS.some(k => {
+      const v = src[k];
+      return v !== null && v !== undefined && v !== "";
+    });
+    if (!hasAnyData) return;
     // 水質タブはアプリ上 nextMon を金曜の意味で使うため、GAS には fri に変換して送る
     const gasKey = (appKey === "nextMon") ? "fri" : appKey;
     const dt = getActualDate(weekIdx, appKey);
