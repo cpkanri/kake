@@ -1257,7 +1257,7 @@ header > .conn-status {
 
 <script>
 // ===== GAS URL =====
-const GAS_URL = 'https://script.google.com/macros/s/AKfycbwRyirzR0mfoX36Tij5IcbW5X1YbxtD937KbcmuZTGpVRvWVZTTMXUwRRV5aZMZovtwDQ/exec';
+const GAS_URL = 'https://script.google.com/macros/s/AKfycbxSnei499GcutvpiN5h0pKGB7l6OfVM__qEFwWmx0uFFjV2zaqgyCh5EN1fr-IGftDlMw/exec';
 
 // ===== 認証 =====
 const AUTH_KEYS = { token: 'kake_auth_token', userId: 'kake_auth_userId', userName: 'kake_auth_userName', expires: 'kake_auth_expires' };
@@ -2710,6 +2710,27 @@ async function fetchWithTimeout(url, options, timeoutMs) {
 }
 
 // 現在のタブ＋週のデータだけをGASに送信
+// "YYYY-MM-DD" 形式の文字列に整形（GAS側 toDateStr と整合）
+function fmtYMD(d) {
+  if (!d) return "";
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+}
+
+// 水質1週分のデータに date を注入し、nextMon → fri にキー変換して GAS 形式に揃える
+function buildWaterDaysPayload(weekIdx) {
+  const sourceWeek = weeklyData.weeks[weekIdx] || {};
+  const days = {};
+  Object.keys(sourceWeek).forEach(appKey => {
+    const src = sourceWeek[appKey];
+    if (!src) return;
+    // 水質タブはアプリ上 nextMon を金曜の意味で使うため、GAS には fri に変換して送る
+    const gasKey = (appKey === "nextMon") ? "fri" : appKey;
+    const dt = getActualDate(weekIdx, appKey);
+    days[gasKey] = Object.assign({}, src, { date: fmtYMD(dt) });
+  });
+  return days;
+}
+
 async function saveCurrentToServer() {
   let payload;
   if (currentSheet === "water") {
@@ -2718,7 +2739,7 @@ async function saveCurrentToServer() {
       month: weeklyData.targetMonth,
       week: currentWeek,
       startDate: weeklyData.startDate,
-      days: weeklyData.weeks[currentWeek]
+      days: buildWaterDaysPayload(currentWeek)
     };
   } else if (currentSheet === "equip") {
     payload = {
@@ -2767,7 +2788,12 @@ async function saveCurrentToServer() {
 async function saveSheetToServer(sheetType) {
   let payload;
   if (sheetType === "water") {
-    payload = { action: 'saveAll', month: weeklyData.targetMonth, startDate: weeklyData.startDate, weeks: weeklyData.weeks };
+    // 全週に対して buildWaterDaysPayload を適用（date 注入 + nextMon→fri 変換）
+    const weeksWithDate = {};
+    Object.keys(weeklyData.weeks || {}).forEach(wn => {
+      weeksWithDate[wn] = buildWaterDaysPayload(Number(wn));
+    });
+    payload = { action: 'saveAll', month: weeklyData.targetMonth, startDate: weeklyData.startDate, weeks: weeksWithDate };
   } else if (sheetType === "equip") {
     payload = { action: 'saveEquipment', month: weeklyData.targetMonth, equipment: weeklyData.equipment };
   } else if (sheetType === "elec") {
