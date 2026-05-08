@@ -983,6 +983,16 @@ header > .conn-status {
       <input type="number" inputmode="decimal" step="0.1" data-field="power100v">
     </div>
     <div class="field">
+      <span class="label">無効電力量</span>
+      <span class="unit">kvarh</span>
+      <input type="number" inputmode="decimal" step="0.01" data-field="reactivePower">
+    </div>
+    <div class="field">
+      <span class="label">デマンド</span>
+      <span class="unit">kW</span>
+      <input type="number" inputmode="decimal" step="0.01" data-field="demand">
+    </div>
+    <div class="field">
       <span class="label">水道使用量</span>
       <span class="unit">㎥</span>
       <input type="number" inputmode="decimal" step="0.001" data-field="water">
@@ -1430,7 +1440,8 @@ async function verifyStoredToken() {
 // ===== 定数定義 =====
 
 const ALL_FIELDS = [
-  "power200v", "power100v", "water", "diesel",
+  "power200v", "power100v", "reactivePower", "demand",
+  "water", "diesel",
   "returnSludge", "excessSludge", "discharge",
   "tempIn", "tempDitch", "tempOut",
   "transIn", "transOut",
@@ -3927,9 +3938,10 @@ function fillWaterSheet(ws, yyyy, mm, holidaySet) {
   const NEXT_WEEK_COL = 14; // N列 = 次週の最初の平日
   // 加計テンプレ: 積算テーブル R4-R12（無効電力量 R6 / デマンド R7 が上殿より +2 行追加）
   // 測定テーブル R16-R36（測定者 R15 / 見出し R13-R14 / 備考 R38）
-  // 上殿のオフセットから一律 +2 ずれている。R6/R7/R37 はキー未定義のため空欄のまま。
+  // 上殿のオフセットから一律 +2 ずれている。R37 はキー未定義のため空欄のまま。
   const ITEM_OFFSETS = {
     power200v: 0, power100v: 1,           // R4 全日電力量, R5 力測電力量
+    reactivePower: 2, demand: 3,           // R6 無効電力量, R7 デマンド
     water: 4, diesel: 5,                   // R8 水道使用量, R9 軽油残量
     returnSludge: 6, excessSludge: 7, discharge: 8,  // R10/R11/R12 各種流量
     tempIn: 12, tempDitch: 13, tempOut: 14,           // R16/R17/R18 水温
@@ -3948,7 +3960,7 @@ function fillWaterSheet(ws, yyyy, mm, holidaySet) {
   const firstMondayDate = getActualDate(1, "mon");
   if (firstMondayDate) {
     const prevLast = getPrevMonthLastDayData(weeklyData.targetMonth, firstMondayDate, holidaySet);
-    const RUISAN_KEYS_I = ["power200v", "power100v", "water", "diesel", "returnSludge", "excessSludge", "discharge"];
+    const RUISAN_KEYS_I = ["power200v", "power100v", "reactivePower", "demand", "water", "diesel", "returnSludge", "excessSludge", "discharge"];
     if (prevLast) {
       const cell = ws.getCell(DATE_ROW_BASE, 9);
       cell.value = toExcelDate(prevLast.date);
@@ -4003,7 +4015,7 @@ function fillWaterSheet(ws, yyyy, mm, holidaySet) {
     // 加計: 測定場所テーブル(Row16以降)用の列マッピング: J列起点（I列はラベル）
     const DAY_COL_MEASURE = { mon: 10, tue: 11, wed: 12, thu: 13, fri: 14 };
     // ITEM_OFFSETS のうち、積算値テーブル(Row4-12、offset 0-8)に属するキー
-    const RUISAN_KEYS = ["power200v", "power100v", "water", "diesel", "returnSludge", "excessSludge", "discharge"];
+    const RUISAN_KEYS = ["power200v", "power100v", "reactivePower", "demand", "water", "diesel", "returnSludge", "excessSludge", "discharge"];
 
     for (const dk in DAY_COL_RUISAN) {
       const colRuisan = DAY_COL_RUISAN[dk];

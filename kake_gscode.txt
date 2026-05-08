@@ -1,12 +1,13 @@
 // 加計浄化センター週報アプリ GASバックエンド（完全版v6 - 加計用21項目対応）
 
 var FIELD_MAP = {
-  power200v: 5, power100v: 6, water: 7, diesel: 8,
-  returnSludge: 9, excessSludge: 10, discharge: 11,
-  tempIn: 12, tempDitch: 13, tempOut: 14, transIn: 15, transOut: 16,
-  phIn: 17, phDitch: 18, phOut: 19, sv10: 20, sv20: 21, sv30: 22, sv24h: 23,
-  mlss: 24, sludgeLevel: 25, chlorine: 26, inspector: 27,
-  tempFinal: 29, transFinal: 30, phFinal: 31, bikou: 32,
+  power200v: 5, power100v: 6, reactivePower: 7, demand: 8,
+  water: 9, diesel: 10,
+  returnSludge: 11, excessSludge: 12, discharge: 13,
+  tempIn: 14, tempDitch: 15, tempOut: 16, transIn: 17, transOut: 18,
+  phIn: 19, phDitch: 20, phOut: 21, sv10: 22, sv20: 23, sv30: 24, sv24h: 25,
+  mlss: 26, sludgeLevel: 27, chlorine: 28, inspector: 29,
+  tempFinal: 30, transFinal: 31, phFinal: 32, bikou: 33,
 };
 var DAY_NAMES = { mon: '月', tue: '火', wed: '水', thu: '木', fri: '金' };
 var DAY_REVERSE = { '月': 'mon', '火': 'tue', '水': 'wed', '木': 'thu', '金': 'fri' };
@@ -18,7 +19,8 @@ var WEEK_CONFIG = {
   5: { dataRow: 188, dateRow: 187, inspectorRow: 197 },
 };
 var ITEM_OFFSETS = {
-  power200v: 0, power100v: 1, water: 2, diesel: 3,
+  power200v: 0, power100v: 1, reactivePower: 7, demand: 8,
+  water: 2, diesel: 3,
   returnSludge: 4, excessSludge: 5, discharge: 6,
   tempIn: 10, tempDitch: 11, tempOut: 12, transIn: 16, transOut: 17,
   phIn: 21, phDitch: 22, phOut: 23, sv10: 24, sv20: 25, sv30: 26, sv24h: 27,
@@ -177,7 +179,7 @@ function checkMldoStatus(month) {
     }
 
     // 日常水質から当月の水温ディッチ入力日数を収集
-    var data = ws.getRange(2, 1, ws.getLastRow() - 1, 32).getValues();
+    var data = ws.getRange(2, 1, ws.getLastRow() - 1, 34).getValues();
     var tempDates = {};
     for (var i = 0; i < data.length; i++) {
       var row = data[i];
@@ -223,7 +225,7 @@ function computeMldoForMonth(month) {
     if (!ws || ws.getLastRow() <= 1) return jsonResponse({error:'日常水質シートにデータがありません'});
 
     // 日常水質から当月の水温ディッチ値を収集
-    var data = ws.getRange(2, 1, ws.getLastRow() - 1, 32).getValues();
+    var data = ws.getRange(2, 1, ws.getLastRow() - 1, 34).getValues();
     // 日付 → 水温ディッチ のマップ
     var tempMap = {};
     for (var i = 0; i < data.length; i++) {
@@ -692,10 +694,10 @@ function getData(month) {
   if(!month) return jsonResponse({error:'月が指定されていません'});
   var ss=SpreadsheetApp.getActiveSpreadsheet(),sheet=ss.getSheetByName('日常水質'),lr=sheet.getLastRow();
   if(lr<=1) return jsonResponse({data:[],month:month});
-  var vals=sheet.getRange(2,1,lr-1,32).getValues(),result=[];
+  var vals=sheet.getRange(2,1,lr-1,34).getValues(),result=[];
   for(var i=0;i<vals.length;i++){var row=vals[i]; if(matchMonth(row[0],month)){
     var rec={month:month,week:row[1],day:row[2],date:row[3]};
-    for(var f in FIELD_MAP){var v=row[FIELD_MAP[f]-1];rec[f]=(v===''||v===null)?null:v;} rec.updatedAt=row[27]; result.push(rec);
+    for(var f in FIELD_MAP){var v=row[FIELD_MAP[f]-1];rec[f]=(v===''||v===null)?null:v;} rec.updatedAt=row[33]; result.push(rec);
   }} return jsonResponse({data:result,month:month});
 }
 function saveWeekData(data) {
@@ -772,7 +774,7 @@ function getAllData(month) {
   if(!month) return jsonResponse({error:'月が指定されていません'});
   var ss=SpreadsheetApp.getActiveSpreadsheet(),result={month:month,water:[],equipment:[],electrical:[],mechanical:[]};
   var ws=ss.getSheetByName('日常水質');
-  if(ws&&ws.getLastRow()>1){var v=ws.getRange(2,1,ws.getLastRow()-1,32).getValues();
+  if(ws&&ws.getLastRow()>1){var v=ws.getRange(2,1,ws.getLastRow()-1,34).getValues();
     for(var i=0;i<v.length;i++){if(matchMonth(v[i][0],month)){var r={week:v[i][1],day:v[i][2],date:v[i][3]};
       for(var f in FIELD_MAP){var val=v[i][FIELD_MAP[f]-1];r[f]=(val===''||val===null)?null:val;} result.water.push(r);}}}
   var es=ss.getSheetByName('機器運転時間');
@@ -805,7 +807,7 @@ function exportExcel(month, templateId) {
     // ===== 日常水質 =====
     var wSheet=sheets[0],ds=ss2.getSheetByName('日常水質');
     if(ds&&ds.getLastRow()>1){
-      var ad=ds.getRange(2,1,ds.getLastRow()-1,32).getValues();
+      var ad=ds.getRange(2,1,ds.getLastRow()-1,34).getValues();
       var md=ad.filter(function(r){return matchMonth(r[0],month);});
       var w1m=md.find(function(r){return r[1]===1&&r[2]==='月';});
       if(w1m&&w1m[3]) wSheet.getRange(3,9).setValue(new Date(w1m[3]));
