@@ -3680,6 +3680,15 @@ function loadScript(src) {
   });
 }
 
+// Phase 12 補追: Excel出力時にハイフン類を「ー」(U+30FC) に統一
+// 単一のハイフン類文字 (- / － / ー / − / – / — / ―) なら U+30FC「ー」を返す。
+// それ以外（数値文字列、複数文字を含む文字列）はそのまま返す。
+function formatHyphenForOutput(value) {
+  if (typeof value !== 'string') return value;
+  if (/^[-－ー−–—―]$/.test(value)) return 'ー';
+  return value;
+}
+
 function setCell(ws, row, col, val) {
   if (val === null || val === undefined || val === "") return;
   const cell = ws.getCell(row, col);
@@ -3688,7 +3697,7 @@ function setCell(ws, row, col, val) {
   if (!isNaN(num) && typeof val === "string" && val.trim() !== "" && /^-?\d+(\.\d+)?$/.test(val.trim())) {
     cell.value = num;
   } else {
-    cell.value = val;
+    cell.value = formatHyphenForOutput(val);
   }
 }
 
