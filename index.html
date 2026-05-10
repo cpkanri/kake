@@ -725,23 +725,15 @@ body.login-active {
   cursor: pointer;
   font-family: inherit;
 }
-/* 強制更新ボタン */
+/* Phase 11-F-CSS: 強制更新ボタン（吉和/筒賀基準に統一） */
 #btnForceRefresh {
-  background: rgba(255,180,80,0.35);
-  color: white;
-  border: 1px solid rgba(255,255,255,0.3);
-  border-radius: 4px;
-  padding: 3px 8px;
-  font-size: 11px;
-  cursor: pointer;
-  font-family: inherit;
-  margin-right: 6px;
+  background: rgba(255,180,80,0.25);
 }
 #btnForceRefresh:hover {
-  background: rgba(255,180,80,0.55);
+  background: rgba(255,180,80,0.4);
 }
 #btnForceRefresh.refreshing {
-  background: rgba(255,180,80,0.7);
+  background: rgba(255,180,80,0.6);
   animation: pulse-refresh 1s infinite;
 }
 @keyframes pulse-refresh {
@@ -839,32 +831,29 @@ header .user-info {
   gap: 8px;
   margin-top: 12px;
 }
+/* Phase 11-F-CSS: 吉和/筒賀 (.sync-btn 系) 基準に値を統一 */
 .btn-header-action {
-  padding: 10px 16px;
-  border: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: rgba(255,255,255,0.15);
+  color: white;
+  border: 1px solid rgba(255,255,255,0.3);
   border-radius: 6px;
-  background: rgba(255,255,255,0.18);
-  color: #fff;
-  font-size: 14px;
-  font-weight: 500;
+  font-size: 12px;
   cursor: pointer;
-  transition: background 0.2s;
-  text-align: center;
-  white-space: nowrap;
   font-family: inherit;
+  line-height: 1.2;
 }
-.btn-header-action:hover {
-  background: rgba(255,255,255,0.28);
-}
-.btn-header-action:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
+.btn-header-action:hover { background: rgba(255,255,255,0.25); }
+.btn-header-action:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-header-action.btn-excel-header {
-  background: rgba(46, 113, 195, 0.85);
+  background: rgba(76,175,80,0.3) !important;
+  border-color: rgba(76,175,80,0.7) !important;
 }
 .btn-header-action.btn-excel-header:hover {
-  background: rgba(46, 113, 195, 1);
+  background: rgba(76,175,80,0.45) !important;
 }
 
 /* 古い conn-status の表示を非表示にしておく（CSSが他で参照する場合の保険） */
