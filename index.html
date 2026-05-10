@@ -825,17 +825,22 @@ header .user-info {
 }
 
 /* ヘッダーアクションボタン横一列 */
+/* Phase 11-F-CSS-2: 4 ボタン (更新/同期/履歴/Excel) を 1 行に収めるため 4 列に */
 .header-actions {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr 1fr;
   gap: 8px;
   margin-top: 12px;
 }
 /* Phase 11-F-CSS: 吉和/筒賀 (.sync-btn 系) 基準に値を統一 */
+/* Phase 11-F-CSS-2: width:100% + justify-content:center で 4 ボタンの幅・テキスト位置を統一 */
 .btn-header-action {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
+  width: 100%;
+  box-sizing: border-box;
   padding: 4px 10px;
   background: rgba(255,255,255,0.15);
   color: white;
@@ -855,6 +860,14 @@ header .user-info {
 .btn-header-action.btn-excel-header:hover {
   background: rgba(76,175,80,0.45) !important;
 }
+/* B-6 (Phase 11-F): ヘッダー内の履歴ボタン用アクセント色（吉和/筒賀基準） */
+.btn-header-action.btn-history-header {
+  background: rgba(100,181,246,0.3) !important;
+  border-color: rgba(100,181,246,0.7) !important;
+}
+.btn-header-action.btn-history-header:hover {
+  background: rgba(100,181,246,0.45) !important;
+}
 
 /* 古い conn-status の表示を非表示にしておく（CSSが他で参照する場合の保険） */
 header > .conn-status {
@@ -862,12 +875,10 @@ header > .conn-status {
 }
 
 /* スマホ対応: 狭い画面でヘッダーアクションを縦並びに */
+/* Phase 11-F-CSS-2: 4 ボタン構成のため 2 列 × 2 行で折り返す。Excel ボタンの span は不要 */
 @media (max-width: 480px) {
   .header-actions {
     grid-template-columns: 1fr 1fr;
-  }
-  .btn-header-action.btn-excel-header {
-    grid-column: span 2;
   }
   .header-top {
     flex-direction: column;
@@ -920,8 +931,11 @@ header > .conn-status {
     </label>
   </div>
   <div class="header-actions">
-    <button type="button" class="btn-header-action" id="btnForceRefresh" title="アプリを最新版に更新">⟳ 更新</button>
-    <button type="button" class="btn-header-action" id="btnSyncHeader">同期</button>
+    <!-- Phase 11-F-CSS-2: 更新ボタンに 🔄、同期ボタンに 🔃 アイコン追加（他ボタンと統一） -->
+    <button type="button" class="btn-header-action" id="btnForceRefresh" title="アプリを最新版に更新">🔄 更新</button>
+    <button type="button" class="btn-header-action" id="btnSyncHeader">🔃 同期</button>
+    <!-- B-6 (Phase 11-F): 保存履歴ボタン（柴木からバックポート） -->
+    <button type="button" class="btn-header-action btn-history-header" id="btnHistory" title="保存履歴を表示">📋 履歴</button>
     <button type="button" class="btn-header-action btn-excel-header" id="btnExcelHeader">📄 Excel出力</button>
   </div>
 </header>
@@ -2717,6 +2731,132 @@ function safeSetItem(key, value) {
   return { ok: false, error: new Error("retry limit exceeded"), deleted, quotaExhausted: true };
 }
 
+// ===== B-6 (Phase 11-F): 保存履歴 =====
+const SAVE_HISTORY_KEY = 'kake_save_history';
+const SAVE_HISTORY_MAX = 50;
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+
+function loadSaveHistory() {
+  try {
+    const raw = localStorage.getItem(SAVE_HISTORY_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch (e) {}
+  return [];
+}
+
+function appendSaveHistory(entry) {
+  const history = loadSaveHistory();
+  history.unshift(entry);  // 新しいものを先頭に
+  if (history.length > SAVE_HISTORY_MAX) history.length = SAVE_HISTORY_MAX;
+  // 容量超過時は他アプリの最古月データを刈り取ってリトライ（safeSetItem 内部で recordPruneHistory も呼ばれる）
+  const res = safeSetItem(SAVE_HISTORY_KEY, JSON.stringify(history));
+  if (!res.ok) console.warn('保存履歴の書込失敗:', res.error || res);
+}
+
+function recordSaveLog(action, scopes, status, errorMsg) {
+  const now = new Date();
+  const ts = now.getFullYear() + '/' +
+    String(now.getMonth() + 1).padStart(2, '0') + '/' +
+    String(now.getDate()).padStart(2, '0') + ' ' +
+    String(now.getHours()).padStart(2, '0') + ':' +
+    String(now.getMinutes()).padStart(2, '0') + ':' +
+    String(now.getSeconds()).padStart(2, '0');
+  const entry = {
+    timestamp: ts,
+    action: action,           // "保存" / "同期" / "クリア" / "全クリア"
+    targetMonth: (typeof weeklyData !== 'undefined' && weeklyData.targetMonth) ? weeklyData.targetMonth : '',
+    scopes: scopes || [],     // ["第1週月曜日【日常水質】"] など
+    status: status || 'success', // 'success' / 'error' / 'partial'
+    errorMsg: errorMsg || '',
+    user: (typeof getAuthUserId === 'function' ? getAuthUserId() : '') || '不明'
+  };
+  appendSaveHistory(entry);
+}
+
+function clearSaveHistory() {
+  if (!confirm('保存履歴をすべて削除しますか？')) return;
+  try {
+    localStorage.removeItem(SAVE_HISTORY_KEY);
+    showToast('保存履歴を削除しました');
+    if (document.getElementById('saveHistoryDialog')) renderSaveHistoryDialog();
+  } catch (e) {
+    showToast('削除に失敗しました', 'error');
+  }
+}
+
+function renderSaveHistoryDialog() {
+  const dialog = document.getElementById('saveHistoryDialog');
+  if (!dialog) return;
+  const history = loadSaveHistory();
+  const body = dialog.querySelector('.history-body');
+  if (history.length === 0) {
+    body.innerHTML = '<div style="padding:30px;text-align:center;color:#666;">保存履歴がまだありません</div>';
+    return;
+  }
+  let html = '<table style="width:100%;border-collapse:collapse;font-size:13px;">';
+  html += '<thead><tr style="background:#1a4f8a;color:#fff;position:sticky;top:0;">';
+  html += '<th style="padding:8px;text-align:left;">日時</th>';
+  html += '<th style="padding:8px;text-align:center;">操作</th>';
+  html += '<th style="padding:8px;text-align:center;">対象月</th>';
+  html += '<th style="padding:8px;text-align:left;">内容</th>';
+  html += '<th style="padding:8px;text-align:center;">結果</th>';
+  html += '</tr></thead><tbody>';
+  history.forEach((h, idx) => {
+    const bg = idx % 2 === 0 ? '#fff' : '#f8fafc';
+    let statusStyle = 'color:#2e7d32;';
+    let statusLabel = '✓ 成功';
+    if (h.status === 'error') {
+      statusStyle = 'color:#c62828;';
+      statusLabel = '✗ 失敗';
+    } else if (h.status === 'partial') {
+      statusStyle = 'color:#f57c00;';
+      statusLabel = '⚠ 一部失敗';
+    }
+    html += '<tr style="background:' + bg + ';border-bottom:1px solid #e0e0e0;">';
+    html += '<td style="padding:6px 8px;white-space:nowrap;font-family:monospace;font-size:12px;">' + escapeHtml(h.timestamp) + '</td>';
+    html += '<td style="padding:6px 8px;text-align:center;font-weight:600;">' + escapeHtml(h.action) + '</td>';
+    html += '<td style="padding:6px 8px;text-align:center;">' + escapeHtml(h.targetMonth || '-') + '</td>';
+    html += '<td style="padding:6px 8px;">' + escapeHtml((h.scopes || []).join(' / ') || '-');
+    if (h.errorMsg) html += '<div style="color:#c62828;font-size:11px;margin-top:2px;">' + escapeHtml(h.errorMsg) + '</div>';
+    html += '</td>';
+    html += '<td style="padding:6px 8px;text-align:center;' + statusStyle + 'font-weight:600;white-space:nowrap;">' + statusLabel + '</td>';
+    html += '</tr>';
+  });
+  html += '</tbody></table>';
+  body.innerHTML = html;
+}
+
+function showSaveHistoryDialog() {
+  let dialog = document.getElementById('saveHistoryDialog');
+  if (!dialog) {
+    // 初回作成
+    dialog = document.createElement('div');
+    dialog.id = 'saveHistoryDialog';
+    dialog.style.cssText = 'display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;align-items:center;justify-content:center;';
+    dialog.innerHTML = `
+      <div style="background:#fff;width:90%;max-width:900px;max-height:85vh;border-radius:12px;display:flex;flex-direction:column;box-shadow:0 10px 30px rgba(0,0,0,0.3);">
+        <div style="padding:16px 20px;border-bottom:1px solid #e0e0e0;display:flex;justify-content:space-between;align-items:center;background:#1a4f8a;color:#fff;border-radius:12px 12px 0 0;">
+          <h3 style="margin:0;font-size:18px;">📋 保存履歴 (最新${SAVE_HISTORY_MAX}件)</h3>
+          <button type="button" id="closeSaveHistoryBtn" style="background:rgba(255,255,255,0.2);color:#fff;border:1px solid rgba(255,255,255,0.5);padding:6px 14px;border-radius:6px;cursor:pointer;font-weight:600;">閉じる</button>
+        </div>
+        <div class="history-body" style="flex:1;overflow:auto;padding:0;"></div>
+        <div style="padding:12px 20px;border-top:1px solid #e0e0e0;display:flex;justify-content:flex-end;gap:8px;background:#f8fafc;border-radius:0 0 12px 12px;">
+          <button type="button" id="clearSaveHistoryBtn" style="background:#ffebee;color:#c62828;border:1px solid #c62828;padding:6px 16px;border-radius:6px;cursor:pointer;font-weight:600;">履歴を削除</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(dialog);
+    document.getElementById('closeSaveHistoryBtn').addEventListener('click', () => { dialog.style.display = 'none'; });
+    document.getElementById('clearSaveHistoryBtn').addEventListener('click', clearSaveHistory);
+    dialog.addEventListener('click', (e) => { if (e.target === dialog) dialog.style.display = 'none'; });
+  }
+  renderSaveHistoryDialog();
+  dialog.style.display = 'flex';
+}
+
 // Phase 12: 機械設備の数値+「-」入力用バリデーション
 // 全角ハイフン類 (ー / − / – / — / － / ―) を半角に正規化、前後の空白を除去
 function normalizeElecMechValue(value) {
@@ -3547,12 +3687,16 @@ function bindEvents() {
       showToast(scope + "を保存しました（サーバーへ送信完了）");
       // 水温データが増えた可能性があるのでMLDOステータスを更新
       updateMldoStatus();
+      // B-6 (Phase 11-F): 保存履歴に記録
+      recordSaveLog('保存', [scope], 'success', '');
     } catch (e) {
       // ネットワーク起因のエラー時のみオフライン表示する
       if (isNetworkError(e)) setConnectionStatus(false);
       const msg = e && e.message ? e.message : String(e);
       console.error('saveCurrentToServer error:', e);
       showToast("端末に" + scope + "を保存しました。サーバー送信失敗：" + msg + "（後で同期してください）", "warn");
+      // B-6 (Phase 11-F): 保存履歴に記録（エラー）
+      recordSaveLog('保存', [scope], 'error', msg);
     } finally {
       btnSave.textContent = "保存";
       btnSave.disabled = false;
@@ -3602,6 +3746,8 @@ function bindEvents() {
 
         // MLDO ステータス更新
         if (typeof updateMldoStatus === 'function') updateMldoStatus();
+        // B-6 (Phase 11-F): 保存履歴に記録（同期）
+        recordSaveLog('同期', parts, 'success', '');
       } else {
         showToast("サーバーにデータがありません", "warn");
       }
@@ -3610,6 +3756,8 @@ function bindEvents() {
       // localStorage QuotaExceededError 等の場合はサーバー接続自体は生きているので維持する。
       if (isNetworkError(e)) setConnectionStatus(false);
       showToast("同期エラー: " + (e.message || e), "error");
+      // B-6 (Phase 11-F): 保存履歴に記録（同期エラー）
+      recordSaveLog('同期', [], 'error', e.message || String(e));
     }
 
     btnSync.textContent = "同期";
@@ -4557,6 +4705,10 @@ function bindLoginEvents() {
 
   const btnForceRefresh = document.getElementById('btnForceRefresh');
   if (btnForceRefresh) btnForceRefresh.addEventListener('click', forceRefresh);
+
+  // B-6 (Phase 11-F): 履歴ボタン
+  const btnHistory = document.getElementById('btnHistory');
+  if (btnHistory) btnHistory.addEventListener('click', () => showSaveHistoryDialog());
 }
 
 // ===== 初期化 =====
