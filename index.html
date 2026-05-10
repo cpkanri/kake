@@ -3935,6 +3935,9 @@ async function exportExcel() {
     }
   } catch (e) { console.error("Daily dates fill:", e); }
 
+  // Phase 13c: 運転管理月報の月初(R6)行に1日データと差分を書込
+  try { fillKakeOperationReportSheet(wb, yyyy, mm); } catch (e) { console.error("fillKakeOperationReportSheet:", e); }
+
   const out = await wb.xlsx.writeBuffer();
   const blob = new Blob([out], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
   const url = URL.createObjectURL(blob);
@@ -4143,6 +4146,69 @@ function fillReportFinalData(wb, yyyy, mm) {
       }
     }
   }
+}
+
+// Phase 13c: 運転管理月報シートの月初(R6)行に1日のデータと差分を書き込む
+// 月初データ列(C/D/E/F/J/L)と月初差分列(K/M)を埋める。
+// R7-R36 はテンプレート式(INDEX/MATCH、LOOKUP)で自動計算されるため触らない。
+function fillKakeOperationReportSheet(wb, yyyy, mm) {
+  const ws = wb.getWorksheet("運転管理月報");
+  if (!ws) return;
+
+  // ===== 1日のデータを取得 =====
+  // 加計の DAYS = ["mon","tue","wed","thu","nextMon"] (金曜は nextMon キー)
+  const dayKeys = ["mon", "tue", "wed", "thu", "nextMon"];
+  let day1Data = null;
+  for (let w = 1; w <= 5; w++) {
+    for (const dk of dayKeys) {
+      const actual = getActualDate(w, dk);
+      if (actual && actual.getFullYear() === yyyy
+          && (actual.getMonth() + 1) === mm
+          && actual.getDate() === 1) {
+        day1Data = (weeklyData.weeks[w] && weeklyData.weeks[w][dk]) || null;
+        break;
+      }
+    }
+    if (day1Data) break;
+  }
+  if (!day1Data) return; // 1日のデータが無ければ何もしない（空欄のまま）
+
+  // ===== R6: C/D/E/F/J/L 列に1日の値を書込 =====
+  setCell(ws, 6, 3,  day1Data.power200v);     // C: 全日電力量
+  setCell(ws, 6, 4,  day1Data.power100v);     // D: 力測電力量
+  setCell(ws, 6, 5,  day1Data.reactivePower); // E: 無効電力量
+  setCell(ws, 6, 6,  day1Data.water);         // F: 上水使用量
+  setCell(ws, 6, 10, day1Data.returnSludge);  // J: 返送汚泥流量 累積
+  setCell(ws, 6, 12, day1Data.excessSludge);  // L: 余剰汚泥流量 累積
+
+  // ===== R6: K/M 列に月初差分を書込 =====
+  // 前月最終点検日のデータから差分計算
+  try {
+    const holidaySet = getHolidaySetFromCache();
+    const firstMondayDate = getActualDate(1, "mon");
+    if (firstMondayDate) {
+      const prevLast = getPrevMonthLastDayData(weeklyData.targetMonth, firstMondayDate, holidaySet);
+      if (prevLast && prevLast.data) {
+        // K6: 返送汚泥流量 1日値 = 1日累積 − 前月末累積
+        const curR = (day1Data.returnSludge != null && day1Data.returnSludge !== "" && day1Data.returnSludge !== "-")
+          ? Number(day1Data.returnSludge) : null;
+        const prevR = (prevLast.data.returnSludge != null && prevLast.data.returnSludge !== "" && prevLast.data.returnSludge !== "-")
+          ? Number(prevLast.data.returnSludge) : null;
+        if (curR != null && !isNaN(curR) && prevR != null && !isNaN(prevR)) {
+          setCell(ws, 6, 11, curR - prevR);
+        }
+
+        // M6: 余剰汚泥流量 1日値 = 1日累積 − 前月末累積
+        const curE = (day1Data.excessSludge != null && day1Data.excessSludge !== "" && day1Data.excessSludge !== "-")
+          ? Number(day1Data.excessSludge) : null;
+        const prevE = (prevLast.data.excessSludge != null && prevLast.data.excessSludge !== "" && prevLast.data.excessSludge !== "-")
+          ? Number(prevLast.data.excessSludge) : null;
+        if (curE != null && !isNaN(curE) && prevE != null && !isNaN(prevE)) {
+          setCell(ws, 6, 13, curE - prevE);
+        }
+      }
+    }
+  } catch (e) { console.warn("月報R6: 月初差分書込失敗", e); }
 }
 
 // 機器運転時間シート（加計浄化センター 21項目、29行ブロック）
