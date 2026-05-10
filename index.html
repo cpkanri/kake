@@ -3729,6 +3729,24 @@ async function exportExcel() {
   const ym = weeklyData.targetMonth || document.getElementById("targetMonth").value;
   const [yyyy, mm] = ym.split("-").map(Number);
 
+  // ===== 年度・月ラベルの動的書込（テンプレ固定値の上書き） =====
+  // テンプレ 日常水質!M1=「令和8年度」、日常機械設備!K1=「令和8年3月分」が
+  // 文字列リテラルで固定されているため、選択月に応じて毎回上書きする。
+  // 電気設備!K1 / 運転管理月報!J1 / 水質管理報告!O1 は K1 参照の数式なので連鎖更新される。
+  const reiwaLabel = yyyy - 2018;
+  const yearLabel  = "令和" + reiwaLabel + "年度";
+  const monthLabel = "令和" + reiwaLabel + "年" + mm + "月分";
+  const wsWaterLabel = wb.getWorksheet("日常水質");
+  if (wsWaterLabel) wsWaterLabel.getCell("M1").value = yearLabel;
+  const wsMechLabel = wb.getWorksheet("日常機械設備");
+  if (wsMechLabel) wsMechLabel.getCell("K1").value = monthLabel;
+  // Excel 開封時の強制再計算（参照数式セルが確実に更新されるため）
+  if (wb.calcProperties) {
+    wb.calcProperties.fullCalcOnLoad = true;
+  } else {
+    wb.calcProperties = { fullCalcOnLoad: true };
+  }
+
   // ===== テンプレートの日付関連数式を一括削除 =====
   // ExcelJS で読み込んだ直後に、日付関連の問題のあるセルを null にすることで、
   // Excel の再計算で月がずれる問題を根本解決する
