@@ -4334,10 +4334,7 @@ function fillReportFinalData(wb, yyyy, mm) {
       if (!dayData) continue;
       const r = 7 + actual.getDate();
       for (const key in FINAL_COLS) {
-        const v = dayData[key];
-        if (v != null && v !== "") {
-          ws.getCell(r, FINAL_COLS[key]).value = Number(v);
-        }
+        setCell(ws, r, FINAL_COLS[key], dayData[key]);
       }
     }
   }
