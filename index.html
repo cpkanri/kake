@@ -3079,9 +3079,22 @@ const EQUIP_NAME_TO_KEY = {
 const DAY_JP_TO_CODE = { "月": "mon", "火": "tue", "水": "wed", "木": "thu", "金": "fri" };
 
 // サーバーデータをマージ
-function mergeServerData(serverData) {
+function mergeServerData(serverData, expectedMonth) {
   const summary = { water_days: 0, equipment_weeks: 0, electrical_days: 0, mechanical_days: 0, merged: false };
   if (!serverData) return summary;
+
+  // Phase 14: 月キー流入防止
+  // (1) 同期開始時の対象月と現在の対象月が違う(同期中にユーザーが月切替) → abort
+  if (expectedMonth && expectedMonth !== weeklyData.targetMonth) {
+    console.warn('[Sync] Target month changed during sync (expected=' + expectedMonth + ', current=' + weeklyData.targetMonth + '). Aborting merge.');
+    return summary;
+  }
+  // (2) レスポンスに月情報があり、対象月と一致しない → abort
+  const responseMonth = serverData.month || serverData.targetMonth || null;
+  if (responseMonth && responseMonth !== weeklyData.targetMonth) {
+    console.warn('[Sync] Month mismatch (targetMonth=' + weeklyData.targetMonth + ', response.month=' + responseMonth + '). Aborting merge.');
+    return summary;
+  }
 
   // water (日常水質)
   if (serverData.water && typeof serverData.water === "object") {
@@ -3181,14 +3194,17 @@ function mergeServerData(serverData) {
 async function syncFromServer() {
   const totalSummary = { water_days: 0, equipment_weeks: 0, electrical_days: 0, mechanical_days: 0, merged: false };
   try {
-    const data = await loadFromServer(weeklyData.targetMonth);
+    // Phase 14: 同期開始時の対象月をローカルに固定（同期完了までユーザーが月切替しても保護）
+    const requestedMonth = weeklyData.targetMonth;
+
+    const data = await loadFromServer(requestedMonth);
 
     // 注: 旧バージョンには前月・翌月もマージする処理があったが、
     // 週番号(1-5)単位でデータが上書きされ、対象月のフォームに前月データが残るバグの原因になっていたため削除。
     // 対象月のデータだけを読み込むことで、月切替時に前月データが残らないようにする。
 
     if (data && (data.weeks || data.water || data.equipment || data.electrical || data.mechanical)) {
-      const s = mergeServerData(data);
+      const s = mergeServerData(data, requestedMonth);
       totalSummary.water_days += s.water_days;
       totalSummary.equipment_weeks += s.equipment_weeks;
       totalSummary.electrical_days += s.electrical_days;
