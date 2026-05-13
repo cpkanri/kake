@@ -889,6 +889,72 @@ header > .conn-status {
     justify-content: flex-end;
   }
 }
+
+/* Phase 17f: 月選択モーダル */
+.modal-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 9999;
+}
+.modal-overlay[hidden] {
+  display: none !important;
+}
+.modal-box {
+  background: #fff;
+  padding: 24px;
+  border-radius: 8px;
+  min-width: 280px;
+  max-width: 90vw;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+}
+.modal-title {
+  margin: 0 0 16px 0;
+  font-size: 1.1em;
+  color: #333;
+}
+.modal-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  margin: 16px 0 24px 0;
+}
+.modal-select {
+  font-size: 1em;
+  padding: 8px 12px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: #fff;
+  min-width: 80px;
+}
+.modal-unit {
+  font-size: 1em;
+  color: #555;
+}
+.modal-buttons {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.modal-btn {
+  padding: 8px 20px;
+  border: none;
+  border-radius: 4px;
+  font-size: 1em;
+  cursor: pointer;
+}
+.modal-btn-cancel {
+  background: #eee;
+  color: #333;
+}
+.modal-btn-confirm {
+  background: #4a8c4a;
+  color: #fff;
+}
 </style>
 </head>
 <body>
@@ -923,7 +989,8 @@ header > .conn-status {
   <div class="header-controls">
     <label>
       <span>対象年月</span>
-      <input type="month" id="targetMonth">
+      <input type="month" id="targetMonth" style="display:none">
+      <button type="button" id="btnTargetMonth" class="btn-header-action">📅 ----</button>
     </label>
     <label>
       <span>第1週 月曜日</span>
@@ -3454,6 +3521,102 @@ function bindEvents() {
     });
   });
 
+  // === Phase 17f: カスタム月選択モーダル ===
+  (function setupTargetMonthModal() {
+    const targetMonthEl = document.getElementById("targetMonth");
+    const btnTargetMonth = document.getElementById("btnTargetMonth");
+    const modal = document.getElementById("targetMonthModal");
+    const selectYear = document.getElementById("modalYear");
+    const selectMonth = document.getElementById("modalMonth");
+    const btnCancel = document.getElementById("modalCancel");
+    const btnConfirm = document.getElementById("modalConfirm");
+
+    if (!targetMonthEl || !btnTargetMonth || !modal) return;
+
+    function populateYearOptions() {
+      const currentYear = new Date().getFullYear();
+      const yearRange = [];
+      for (let y = currentYear - 3; y <= currentYear + 2; y++) {
+        yearRange.push(y);
+      }
+      selectYear.innerHTML = '';
+      yearRange.forEach(y => {
+        const opt = document.createElement('option');
+        opt.value = y;
+        opt.textContent = y;
+        selectYear.appendChild(opt);
+      });
+    }
+
+    function populateMonthOptions() {
+      selectMonth.innerHTML = '';
+      for (let m = 1; m <= 12; m++) {
+        const opt = document.createElement('option');
+        opt.value = String(m).padStart(2, '0');
+        opt.textContent = m;
+        selectMonth.appendChild(opt);
+      }
+    }
+
+    populateYearOptions();
+    populateMonthOptions();
+
+    function updateButtonLabel() {
+      const v = targetMonthEl.value || '';
+      btnTargetMonth.textContent = '📅 ' + (v || '----');
+    }
+    updateButtonLabel();
+
+    const observer = new MutationObserver(updateButtonLabel);
+    observer.observe(targetMonthEl, { attributes: true, attributeFilter: ['value'] });
+    targetMonthEl.addEventListener('change', updateButtonLabel);
+
+    btnTargetMonth.addEventListener('click', () => {
+      const v = targetMonthEl.value || '';
+      const m = v.match(/^(\d{4})-(\d{2})$/);
+      if (m) {
+        if (!Array.from(selectYear.options).some(o => o.value === m[1])) {
+          const opt = document.createElement('option');
+          opt.value = m[1];
+          opt.textContent = m[1];
+          selectYear.appendChild(opt);
+        }
+        selectYear.value = m[1];
+        selectMonth.value = m[2];
+      } else {
+        const now = new Date();
+        selectYear.value = now.getFullYear();
+        selectMonth.value = String(now.getMonth() + 1).padStart(2, '0');
+      }
+      modal.hidden = false;
+    });
+
+    btnCancel.addEventListener('click', () => {
+      modal.hidden = true;
+    });
+
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) modal.hidden = true;
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !modal.hidden) {
+        modal.hidden = true;
+      }
+    });
+
+    btnConfirm.addEventListener('click', () => {
+      const newValue = selectYear.value + '-' + selectMonth.value;
+      modal.hidden = true;
+      if (targetMonthEl.value === newValue) {
+        return;
+      }
+      targetMonthEl.value = newValue;
+      targetMonthEl.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  })();
+  // === Phase 17f end ===
+
   // 対象月変更
   document.getElementById("targetMonth").addEventListener("change", (e) => {
     const newMonth = e.target.value;
@@ -5091,6 +5254,23 @@ attachUndoToTableInputs();
 </script>
 
 <!-- Excel テンプレート（Base64） -->
+<!-- Phase 17f: カスタム月選択モーダル -->
+<div id="targetMonthModal" class="modal-overlay" hidden>
+  <div class="modal-box">
+    <h3 class="modal-title">対象年月を選択</h3>
+    <div class="modal-row">
+      <select id="modalYear" class="modal-select"></select>
+      <span class="modal-unit">年</span>
+      <select id="modalMonth" class="modal-select"></select>
+      <span class="modal-unit">月</span>
+    </div>
+    <div class="modal-buttons">
+      <button type="button" id="modalCancel" class="modal-btn modal-btn-cancel">キャンセル</button>
+      <button type="button" id="modalConfirm" class="modal-btn modal-btn-confirm">変更</button>
+    </div>
+  </div>
+</div>
+
 <script src="./template.js"></script>
 
 <script>
