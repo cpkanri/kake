@@ -1892,6 +1892,16 @@ let isOnline = false;
 
 // ===== ユーティリティ =====
 
+// Phase 18-b: bikou タイムスタンプ混入の安全網
+function isISOTimestamp(v) {
+  return typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(v);
+}
+function sanitizeBikou(v) {
+  if (typeof v !== 'string') return '';
+  if (isISOTimestamp(v)) return '';
+  return v;
+}
+
 function emptyDay() {
   const d = {};
   ALL_FIELDS.forEach(k => { d[k] = (k === "inspector" || k === "bikou") ? "" : null; });
@@ -2574,6 +2584,9 @@ function saveFormToData() {
         const num = Number(el.value);
         day[key] = isNaN(num) ? el.value : num;
       }
+    } else if (key === "bikou") {
+      // Phase 18-b: bikou に ISO タイムスタンプが入っていれば空に
+      day[key] = sanitizeBikou(el.value);
     } else {
       day[key] = el.value;
     }
@@ -3021,7 +3034,12 @@ function buildWaterDaysPayload(weekIdx) {
     // 水質タブはアプリ上 nextMon を金曜の意味で使うため、GAS には fri に変換して送る
     const gasKey = (appKey === "nextMon") ? "fri" : appKey;
     const dt = getActualDate(weekIdx, appKey);
-    days[gasKey] = Object.assign({}, src, { date: fmtYMD(dt) });
+    const payload = Object.assign({}, src, { date: fmtYMD(dt) });
+    // Phase 18-b: 送信前に bikou を sanitize（ISO タイムスタンプの再循環を断つ）
+    if ('bikou' in payload) {
+      payload.bikou = sanitizeBikou(payload.bikou);
+    }
+    days[gasKey] = payload;
   });
   return days;
 }
@@ -3168,7 +3186,17 @@ function mergeServerData(serverData, expectedMonth) {
         Object.keys(wData).forEach(d => {
           const dayCode = DAY_JP_TO_CODE[d] || d;
           if (weeklyData.weeks[w][dayCode]) {
-            Object.assign(weeklyData.weeks[w][dayCode], wData[d]);
+            const target = weeklyData.weeks[w][dayCode];
+            const src = wData[d];
+            if (src && typeof src === 'object') {
+              Object.keys(src).forEach(k => {
+                // Phase 18-b: 予約フィールドは skip
+                if (k === 'week' || k === 'day' || k === 'updatedAt') return;
+                // Phase 18-b: bikou は ISO タイムスタンプならスキップ
+                if (k === 'bikou' && isISOTimestamp(src[k])) return;
+                target[k] = src[k];
+              });
+            }
             summary.water_days++;
           }
         });
@@ -3219,7 +3247,13 @@ function mergeServerData(serverData, expectedMonth) {
         Object.keys(wData).forEach(d => {
           const dayCode = DAY_JP_TO_CODE[d] || d;
           if (weeklyData.electrical[w][dayCode] && typeof wData[d] === "object") {
-            Object.assign(weeklyData.electrical[w][dayCode], wData[d]);
+            const target = weeklyData.electrical[w][dayCode];
+            const src = wData[d];
+            Object.keys(src).forEach(k => {
+              // Phase 18-b: 予約フィールドは skip
+              if (k === 'week' || k === 'day' || k === 'updatedAt') return;
+              target[k] = src[k];
+            });
             summary.electrical_days++;
           }
         });
@@ -3237,7 +3271,13 @@ function mergeServerData(serverData, expectedMonth) {
         Object.keys(wData).forEach(d => {
           const dayCode = DAY_JP_TO_CODE[d] || d;
           if (weeklyData.mechanical[w][dayCode] && typeof wData[d] === "object") {
-            Object.assign(weeklyData.mechanical[w][dayCode], wData[d]);
+            const target = weeklyData.mechanical[w][dayCode];
+            const src = wData[d];
+            Object.keys(src).forEach(k => {
+              // Phase 18-b: 予約フィールドは skip
+              if (k === 'week' || k === 'day' || k === 'updatedAt') return;
+              target[k] = src[k];
+            });
             summary.mechanical_days++;
           }
         });
@@ -3507,6 +3547,8 @@ function bindEvents() {
       const key = el.dataset.field;
       if (el.type === "number") {
         day[key] = el.value === "" ? null : Number(el.value);
+      } else if (key === "bikou") {
+        day[key] = sanitizeBikou(el.value);
       } else {
         day[key] = el.value;
       }
