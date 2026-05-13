@@ -471,14 +471,6 @@ header h1 {
 .elec-panel.visible { display: block; }
 .mech-panel { display: none; }
 .mech-panel.visible { display: block; }
-/* Phase 17: 電気設備の使用量自動計算セル（読み − 前回読み）。読み取り専用で視覚的に区別。 */
-.elec-autocalc-cell {
-  background: #f0f4f8;
-  color: #1a4f8a;
-  font-weight: 600;
-  cursor: not-allowed;
-}
-.elec-autocalc-cell:focus { outline: none; }
 .equip-table .section-row td {
   background: #eef5f1;
   color: #0d4f34;
@@ -2344,13 +2336,13 @@ function buildElecTable() {
     tbody.appendChild(hdr);
     // フィールド行
     sec.fields.forEach(f => {
+      // Phase 17-b: autoCalc 項目は UI 描画から完全除外（筒賀方式、tutuga index.html:5227-5234 準拠）
+      // 値は recomputeElecAutoCalc が weeklyData.electrical[w][d][useKey] に直接代入する。
+      if (f.type === "autoCalc") return;
       const tr = document.createElement("tr");
       let html = '<td>' + f.label + (f.unit ? ' <span style="color:#888;font-size:10px">(' + f.unit + ')</span>' : '') + '</td>';
       EQUIP_DAYS.forEach(d => {
-        if (f.type === "autoCalc") {
-          // Phase 17: 使用量自動計算セル — 読取専用、recomputeElecAutoCalc が値を投入
-          html += '<td><input type="text" readonly tabindex="-1" class="elec-autocalc-cell" data-autocalc="1" data-elec="' + f.key + '" data-eday="' + d + '"></td>';
-        } else if (f.type === "number") {
+        if (f.type === "number") {
           if (f.dashSupport) {
             // Phase 12 補追2: dashSupport: true のフィールド (力率等) は「-」と全角ハイフンを許容
             html += '<td><input type="text" inputmode="decimal" data-elec-mech-numeric="1" placeholder="-" data-elec="' + f.key + '" data-eday="' + d + '"></td>';
@@ -2571,7 +2563,9 @@ function computeElectricalUsage(month, week, day, sourceKey) {
   return isFinite(usage) ? usage : '';
 }
 
-// 単一セル再計算: 1曜日 × 1ペアの使用量を weeklyData + DOM に反映
+// 単一セル再計算: 1曜日 × 1ペアの使用量を weeklyData に反映
+// Phase 17-b: autoCalc 項目は UI に描画されないため DOM 書き換えは行わない。
+// 値の参照経路: saveCurrentToServer / fillElecSheet が weeklyData.electrical[w][d][useKey] を直接読む。
 function recomputeElecAutoCalcCell(day, sourceKey) {
   let useKey = null;
   for (const k in ELEC_AUTO_CALC_PAIRS) {
@@ -2584,8 +2578,6 @@ function recomputeElecAutoCalcCell(day, sourceKey) {
   if (!dayData) return;
   const usage = month ? computeElectricalUsage(month, currentWeek, day, sourceKey) : '';
   dayData[useKey] = (usage === '' || usage == null) ? null : usage;
-  const input = document.querySelector('#elecTable input[data-elec="' + useKey + '"][data-eday="' + day + '"]');
-  if (input) input.value = (usage === '' || usage == null) ? '' : String(usage);
 }
 
 // 現週・全曜日・全ペアの使用量を再計算（loadElecDataToForm 直後に呼ぶ）
