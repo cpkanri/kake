@@ -471,6 +471,14 @@ header h1 {
 .elec-panel.visible { display: block; }
 .mech-panel { display: none; }
 .mech-panel.visible { display: block; }
+/* Phase 17: 電気設備の使用量自動計算セル（読み − 前回読み）。読み取り専用で視覚的に区別。 */
+.elec-autocalc-cell {
+  background: #f0f4f8;
+  color: #1a4f8a;
+  font-weight: 600;
+  cursor: not-allowed;
+}
+.elec-autocalc-cell:focus { outline: none; }
 .equip-table .section-row td {
   background: #eef5f1;
   color: #0d4f34;
@@ -1747,6 +1755,28 @@ const ELEC_SECTIONS = [
 // 全電気フィールドキーのフラットリスト
 const ALL_ELEC_KEYS = ELEC_SECTIONS.flatMap(s => s.fields.map(f => f.key));
 
+// ===== Phase 17: 電気設備 使用量自動計算 (筒賀/吉和 横展開) =====
+// 「読み」/「使用量」ペア宣言。使用量フィールドは type:'autoCalc' に変更し、
+// 「今回検針値 − 前回検針値」で自動計算した値を readonly セルに表示する。
+// 計算ソースが空 or 前回値が遡れる範囲(同週前曜日→同月前週→最大2ヶ月前)に無ければ空欄。
+const ELEC_AUTO_CALC_PAIRS = {
+  ePowerUse:     'ePowerRead',
+  ctrlPanel1Use: 'ctrlPanel1Read',
+  ctrlPanel2Use: 'ctrlPanel2Read',
+  ctrlPanel3Use: 'ctrlPanel3Read',
+  ctrlPanel4Use: 'ctrlPanel4Read'
+};
+const ELEC_AUTO_CALC_USE_KEYS  = new Set(Object.keys(ELEC_AUTO_CALC_PAIRS));
+const ELEC_AUTO_CALC_READ_KEYS = new Set(Object.values(ELEC_AUTO_CALC_PAIRS));
+ELEC_SECTIONS.forEach(sec => {
+  (sec.fields || []).forEach(f => {
+    if (ELEC_AUTO_CALC_USE_KEYS.has(f.key)) {
+      f.type = 'autoCalc';
+      f.autoCalcFrom = ELEC_AUTO_CALC_PAIRS[f.key];
+    }
+  });
+});
+
 // 機械設備の曜日（火曜なし）
 const MECH_DAYS = ["mon", "tue", "wed", "thu", "fri"];
 
@@ -2317,7 +2347,10 @@ function buildElecTable() {
       const tr = document.createElement("tr");
       let html = '<td>' + f.label + (f.unit ? ' <span style="color:#888;font-size:10px">(' + f.unit + ')</span>' : '') + '</td>';
       EQUIP_DAYS.forEach(d => {
-        if (f.type === "number") {
+        if (f.type === "autoCalc") {
+          // Phase 17: 使用量自動計算セル — 読取専用、recomputeElecAutoCalc が値を投入
+          html += '<td><input type="text" readonly tabindex="-1" class="elec-autocalc-cell" data-autocalc="1" data-elec="' + f.key + '" data-eday="' + d + '"></td>';
+        } else if (f.type === "number") {
           if (f.dashSupport) {
             // Phase 12 補追2: dashSupport: true のフィールド (力率等) は「-」と全角ハイフンを許容
             html += '<td><input type="text" inputmode="decimal" data-elec-mech-numeric="1" placeholder="-" data-elec="' + f.key + '" data-eday="' + d + '"></td>';
@@ -2381,11 +2414,33 @@ function buildElecTable() {
       }
     });
   });
+  // Phase 17: 検針値入力時に対応する使用量セルを即時再計算
+  tbody.querySelectorAll('input[data-elec]').forEach(el => {
+    const key = el.dataset.elec;
+    if (!ELEC_AUTO_CALC_READ_KEYS.has(key)) return;
+    el.addEventListener('input', () => {
+      const day = el.dataset.eday;
+      const wk = weeklyData.electrical && weeklyData.electrical[currentWeek];
+      if (wk && wk[day]) {
+        const v = el.value;
+        if (v === '' || v === null || v === undefined) {
+          wk[day][key] = null;
+        } else {
+          const num = Number(v);
+          wk[day][key] = isNaN(num) ? v : num;
+        }
+      }
+      recomputeElecAutoCalcCell(day, key);
+    });
+  });
 }
 
 function saveElecFormToData() {
   const week = weeklyData.electrical[currentWeek];
   document.querySelectorAll("[data-elec]").forEach(el => {
+    // Phase 17: 使用量セルは recompute が weeklyData を直接更新するため
+    // DOM 経由の上書き対象から除外する（旧手入力値の意図しない再注入を防ぐ）
+    if (el.dataset.autocalc === "1") return;
     const key = el.dataset.elec;
     const day = el.dataset.eday;
     if (!week || !week[day]) return;
@@ -2437,6 +2492,109 @@ function loadElecDataToForm() {
       el.dataset.val = val;
       el.textContent = val;
     }
+  });
+  // Phase 17: 検針値を元に使用量を再計算（保存済みの旧手入力値は無視して上書き）
+  recomputeElecAutoCalc();
+}
+
+// ===== Phase 17: 電気設備 使用量自動計算ヘルパー (筒賀 横展開) =====
+// 同フィールドの直近の「読み」値を遡って探索（最大 2 ヶ月前まで）。
+// 順序: 同週前曜日 → 同月前週 → 前月最終週 → 前々月最終週。見つからなければ null。
+function findPreviousElecReading(month, week, day, sourceKey) {
+  const dayOrder = EQUIP_DAYS;
+  const currentIdx = dayOrder.indexOf(day);
+
+  const elecForMonth = (m) => {
+    if (m === month) return weeklyData.electrical || {};
+    try {
+      const raw = localStorage.getItem('kake_weekly_' + m);
+      if (!raw) return {};
+      const data = JSON.parse(raw);
+      return (data && data.electrical) || {};
+    } catch (e) { return {}; }
+  };
+
+  const tryOne = (m, w, d) => {
+    const elec = elecForMonth(m);
+    const wk = elec[w];
+    if (!wk) return null;
+    const dayData = wk[d];
+    if (!dayData) return null;
+    const v = dayData[sourceKey];
+    if (v === null || v === undefined || v === '') return null;
+    const n = Number(v);
+    return isFinite(n) ? n : null;
+  };
+
+  // 同週前曜日
+  if (currentIdx > 0) {
+    for (let i = currentIdx - 1; i >= 0; i--) {
+      const v = tryOne(month, week, dayOrder[i]);
+      if (v !== null) return v;
+    }
+  }
+  // 同月前週（fri→mon の順）
+  for (let w = week - 1; w >= 1; w--) {
+    for (let i = dayOrder.length - 1; i >= 0; i--) {
+      const v = tryOne(month, w, dayOrder[i]);
+      if (v !== null) return v;
+    }
+  }
+  // 前月（最大 2 ヶ月遡る）
+  let m = month;
+  for (let monthsBack = 0; monthsBack < 2; monthsBack++) {
+    const parts = String(m).split('-').map(Number);
+    if (parts.length !== 2 || isNaN(parts[0]) || isNaN(parts[1])) break;
+    const prev = new Date(parts[0], parts[1] - 2, 1);
+    m = prev.getFullYear() + '-' + String(prev.getMonth() + 1).padStart(2, '0');
+    for (let w = 5; w >= 1; w--) {
+      for (let i = dayOrder.length - 1; i >= 0; i--) {
+        const v = tryOne(m, w, dayOrder[i]);
+        if (v !== null) return v;
+      }
+    }
+  }
+  return null;
+}
+
+// 当日の読み − 直近の読み を返す。前回データなし or 入力不備なら '' を返す。
+function computeElectricalUsage(month, week, day, sourceKey) {
+  const wk = (weeklyData.electrical || {})[week];
+  const dayData = wk && wk[day];
+  const currentRaw = dayData && dayData[sourceKey];
+  if (currentRaw === null || currentRaw === undefined || currentRaw === '') return '';
+  const current = Number(currentRaw);
+  if (!isFinite(current)) return '';
+  const prev = findPreviousElecReading(month, week, day, sourceKey);
+  if (prev === null) return '';
+  const usage = current - prev;
+  return isFinite(usage) ? usage : '';
+}
+
+// 単一セル再計算: 1曜日 × 1ペアの使用量を weeklyData + DOM に反映
+function recomputeElecAutoCalcCell(day, sourceKey) {
+  let useKey = null;
+  for (const k in ELEC_AUTO_CALC_PAIRS) {
+    if (ELEC_AUTO_CALC_PAIRS[k] === sourceKey) { useKey = k; break; }
+  }
+  if (!useKey) return;
+  const month = weeklyData.targetMonth;
+  const wk = weeklyData.electrical && weeklyData.electrical[currentWeek];
+  const dayData = wk && wk[day];
+  if (!dayData) return;
+  const usage = month ? computeElectricalUsage(month, currentWeek, day, sourceKey) : '';
+  dayData[useKey] = (usage === '' || usage == null) ? null : usage;
+  const input = document.querySelector('#elecTable input[data-elec="' + useKey + '"][data-eday="' + day + '"]');
+  if (input) input.value = (usage === '' || usage == null) ? '' : String(usage);
+}
+
+// 現週・全曜日・全ペアの使用量を再計算（loadElecDataToForm 直後に呼ぶ）
+function recomputeElecAutoCalc() {
+  if (!weeklyData.electrical || !weeklyData.electrical[currentWeek]) return;
+  EQUIP_DAYS.forEach(day => {
+    Object.values(ELEC_AUTO_CALC_PAIRS).forEach(sourceKey => {
+      recomputeElecAutoCalcCell(day, sourceKey);
+    });
   });
 }
 
@@ -5175,7 +5333,8 @@ function getAdvanceableFields() {
     const result = [];
     const days = ["mon", "tue", "wed", "thu", "fri"];
     days.forEach(d => {
-      document.querySelectorAll('#elecPanel input[data-elec][data-eday="' + d + '"], #elecPanel button[data-elec][data-eday="' + d + '"].toggle-btn').forEach(el => result.push(el));
+      // Phase 17: readonly な使用量自動計算セルは Enter ナビゲーション対象から除外
+      document.querySelectorAll('#elecPanel input[data-elec][data-eday="' + d + '"]:not([data-autocalc]), #elecPanel button[data-elec][data-eday="' + d + '"].toggle-btn').forEach(el => result.push(el));
     });
     return result;
   } else if (currentSheet === "mech") {
