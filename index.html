@@ -992,10 +992,6 @@ header > .conn-status {
       <input type="month" id="targetMonth" style="display:none">
       <button type="button" id="btnTargetMonth" class="btn-header-action">📅 ----</button>
     </label>
-    <label>
-      <span>第1週 月曜日</span>
-      <input type="date" id="startDate" readonly style="opacity:0.8;pointer-events:none;">
-    </label>
   </div>
   <div class="header-actions">
     <!-- Phase 11-F-CSS-2: 更新ボタンに 🔄、同期ボタンに 🔃 アイコン追加（他ボタンと統一） -->
@@ -3280,7 +3276,6 @@ async function syncFromServer() {
       // startDate を強制再計算（mergeServerData 内でも再計算するが二重保険）
       weeklyData.startDate = estimateStartDate(weeklyData.targetMonth);
       // UI更新
-      document.getElementById("startDate").value = weeklyData.startDate || "";
       updateDayTabs();
       updateWeekTabs();
       updateEquipWeekTabs();
@@ -3661,7 +3656,6 @@ function bindEvents() {
     // 常にestimateStartDateで上書き（readonlyのため）
     weeklyData.startDate = estimateStartDate(newMonth);
     ensureWeeklyStructure();
-    document.getElementById("startDate").value = weeklyData.startDate || "";
     localStorage.setItem("kake_current_month", newMonth);
     currentWeek = 1;
     currentDay = "mon";
@@ -4925,7 +4919,6 @@ async function continueInit() {
   weeklyData.startDate = estimateStartDate(weeklyData.targetMonth);
 
   document.getElementById("targetMonth").value = weeklyData.targetMonth;
-  document.getElementById("startDate").value = weeklyData.startDate;
   localStorage.setItem("kake_current_month", weeklyData.targetMonth);
 
   if (!window.__eventsBound) {
