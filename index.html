@@ -955,6 +955,71 @@ header > .conn-status {
   background: #4a8c4a;
   color: #fff;
 }
+
+/* Phase 17: ヘッダーボタン B デザイン（2 グループ統一） */
+.header-btn-area {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+}
+.header-btn-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.header-btn-group-label {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.6);
+  margin-bottom: 4px;
+  padding-left: 2px;
+  letter-spacing: 0.05em;
+}
+.header-btn-group {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+}
+.header-btn {
+  background: rgba(255, 255, 255, 0.06);
+  border: none;
+  color: white;
+  padding: 10px 4px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  transition: background 0.15s;
+  font-family: inherit;
+  min-width: 0;
+}
+.header-btn:hover,
+.header-btn:active {
+  background: rgba(255, 255, 255, 0.16);
+}
+.header-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.header-btn:disabled:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+.header-btn-icon {
+  font-size: 18px;
+  line-height: 1;
+}
+.header-btn-label {
+  font-size: 12px;
+  white-space: nowrap;
+}
 </style>
 </head>
 <body>
@@ -993,13 +1058,34 @@ header > .conn-status {
       <button type="button" id="btnTargetMonth" class="btn-header-action">📅 ----</button>
     </label>
   </div>
-  <div class="header-actions">
-    <!-- Phase 11-F-CSS-2: 更新ボタンに 🔄、同期ボタンに 🔃 アイコン追加（他ボタンと統一） -->
-    <button type="button" class="btn-header-action" id="btnForceRefresh" title="アプリを最新版に更新">🔄 更新</button>
-    <button type="button" class="btn-header-action" id="btnSyncHeader">🔃 同期</button>
-    <!-- B-6 (Phase 11-F): 保存履歴ボタン（柴木からバックポート） -->
-    <button type="button" class="btn-header-action btn-history-header" id="btnHistory" title="保存履歴を表示">📋 履歴</button>
-    <button type="button" class="btn-header-action btn-excel-header" id="btnExcelHeader">📄 Excel出力</button>
+  <!-- Phase 17 ヘッダー B デザイン: 2 グループ統一 -->
+  <div class="header-btn-area">
+    <div class="header-btn-col">
+      <div class="header-btn-group-label">データ</div>
+      <div class="header-btn-group">
+        <button type="button" id="btnForceRefresh" class="header-btn" title="アプリを最新版に更新">
+          <span class="header-btn-icon">🔄</span>
+          <span class="header-btn-label">更新</span>
+        </button>
+        <button type="button" id="btnSyncHeader" class="header-btn">
+          <span class="header-btn-icon">☁️</span>
+          <span class="header-btn-label">同期</span>
+        </button>
+      </div>
+    </div>
+    <div class="header-btn-col">
+      <div class="header-btn-group-label">出力</div>
+      <div class="header-btn-group">
+        <button type="button" id="btnHistory" class="header-btn" title="保存履歴を表示">
+          <span class="header-btn-icon">📋</span>
+          <span class="header-btn-label">履歴</span>
+        </button>
+        <button type="button" id="btnExcelHeader" class="header-btn">
+          <span class="header-btn-icon">📊</span>
+          <span class="header-btn-label">Excel</span>
+        </button>
+      </div>
+    </div>
   </div>
 </header>
 
@@ -1317,7 +1403,7 @@ header > .conn-status {
 <!-- 操作ボタン -->
 <div class="actions">
   <button type="button" class="btn-copy" id="btnCopy">前日コピー</button>
-  <button type="button" class="btn-clear" id="btnClear">全クリア</button>
+  <button type="button" class="btn-clear" id="btnClear">クリア</button>
   <button type="button" class="btn-undo" id="btnUndo" disabled>↩ 戻す</button>
   <button type="button" class="btn-save" id="btnSave">保存</button>
 </div>
@@ -3937,7 +4023,7 @@ function bindEvents() {
     }
 
     btnSync.disabled = true;
-    btnSync.textContent = "取得中...";
+    btnSync.querySelector('.header-btn-label').textContent = "取得中...";
 
     try {
       const summary = await syncFromServer();
@@ -3975,14 +4061,14 @@ function bindEvents() {
       recordSaveLog('同期', [], 'error', e.message || String(e));
     }
 
-    btnSync.textContent = "同期";
+    btnSync.querySelector('.header-btn-label').textContent = "同期";
     btnSync.disabled = false;
   });
 
   // Excel出力ボタン（クライアントサイド ExcelJS）
   document.getElementById("btnExcelHeader").addEventListener("click", async () => {
     const btnExcel = document.getElementById("btnExcelHeader");
-    btnExcel.textContent = "生成中...";
+    btnExcel.querySelector('.header-btn-label').textContent = "生成中...";
     btnExcel.disabled = true;
     try {
       await exportExcel();
@@ -3990,7 +4076,7 @@ function bindEvents() {
       console.error(e);
       showToast("Excel生成に失敗しました: " + e.message, "error");
     } finally {
-      btnExcel.textContent = "📄 Excel出力";
+      btnExcel.querySelector('.header-btn-label').textContent = "Excel";
       btnExcel.disabled = false;
     }
   });
