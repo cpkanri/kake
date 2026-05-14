@@ -5233,7 +5233,9 @@ async function continueInit() {
   // startDate は常に対象月から自動算出（readonly）
   weeklyData.startDate = estimateStartDate(weeklyData.targetMonth);
 
-  document.getElementById("targetMonth").value = weeklyData.targetMonth;
+  // Phase 19-D: localStorage 由来の値に ISO タイムスタンプが残存していても
+  // <input type="month"> がパースエラーを出さないよう YYYY-MM に正規化
+  document.getElementById("targetMonth").value = String(weeklyData.targetMonth).slice(0, 7);
   localStorage.setItem("kake_current_month", weeklyData.targetMonth);
 
   if (!window.__eventsBound) {
