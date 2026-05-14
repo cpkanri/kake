@@ -3370,6 +3370,47 @@ async function saveSheetToServer(sheetType) {
   return result;
 }
 
+// Phase 18-B: 全タブ一括アップロード。データが入っているシートのみ送信する
+// （書き込み先シートが別なので並列実行で競合しない）。
+function _p18bHasAnyValue(v) {
+  if (v === null || v === undefined || v === "") return false;
+  if (typeof v !== "object") return true;
+  for (const k in v) { if (_p18bHasAnyValue(v[k])) return true; }
+  return false;
+}
+async function uploadAllTabs() {
+  const sheets = [
+    { type: "water", label: getSheetLabel("water"), data: weeklyData.weeks },
+    { type: "equip", label: getSheetLabel("equip"), data: weeklyData.equipment },
+    { type: "elec",  label: getSheetLabel("elec"),  data: weeklyData.electrical },
+    { type: "mech",  label: getSheetLabel("mech"),  data: weeklyData.mechanical }
+  ];
+  const targets = sheets.filter(s => _p18bHasAnyValue(s.data));
+  const results = { scopes: [] };
+  if (targets.length === 0) return results;
+
+  const settled = await Promise.allSettled(targets.map(s => saveSheetToServer(s.type)));
+  const errors = [];
+  settled.forEach((r, i) => {
+    const label = targets[i].label;
+    if (r.status === "fulfilled") {
+      results.scopes.push(label);
+    } else {
+      const reason = r.reason;
+      errors.push(label + ": " + ((reason && reason.message) || String(reason)));
+    }
+  });
+  if (errors.length > 0) {
+    const successText = results.scopes.length > 0
+      ? "保存成功(" + results.scopes.join("・") + ") / "
+      : "";
+    const err = new Error(successText + "失敗(" + errors.join(", ") + ")");
+    err.partialResults = results;
+    throw err;
+  }
+  return results;
+}
+
 // GASからデータを取得（全シート）
 async function loadFromServer(month) {
   const url = withToken(GAS_URL + '?action=getAllData&month=' + encodeURIComponent(month));
@@ -4122,32 +4163,28 @@ function bindEvents() {
       return;
     }
 
-    // b. 現在のタブ＋週だけGASに送信
+    // b. Phase 18-B: 全タブ一括送信（タブ切替忘れによる保存漏れ防止）
     btnSave.textContent = "送信中...";
     btnSave.disabled = true;
 
-    const sheetLabel = getSheetLabel(currentSheet);
-    const scope = currentSheet === 'water'
-      ? '第' + currentWeek + '週' + currentDay + '曜日【' + sheetLabel + '】'
-      : '第' + currentWeek + '週【' + sheetLabel + '】';
-
     try {
-      await saveCurrentToServer();
+      const result = await uploadAllTabs();
       setConnectionStatus(true);
       markClean();
-      showToast(scope + "を保存しました（サーバーへ送信完了）");
+      const scopeText = result.scopes.length > 0 ? result.scopes.join('・') : '（送信データなし）';
+      showToast("保存しました（" + scopeText + "）");
       // 水温データが増えた可能性があるのでMLDOステータスを更新
       updateMldoStatus();
       // B-6 (Phase 11-F): 保存履歴に記録
-      recordSaveLog('保存', [scope], 'success', '');
+      recordSaveLog('保存', result.scopes, 'success', '');
     } catch (e) {
       // ネットワーク起因のエラー時のみオフライン表示する
       if (isNetworkError(e)) setConnectionStatus(false);
       const msg = e && e.message ? e.message : String(e);
-      console.error('saveCurrentToServer error:', e);
-      showToast("端末に" + scope + "を保存しました。サーバー送信失敗：" + msg + "（後で同期してください）", "warn");
+      console.error('uploadAllTabs error:', e);
+      showToast("端末に保存しました。サーバー送信失敗：" + msg + "（後で同期してください）", "warn");
       // B-6 (Phase 11-F): 保存履歴に記録（エラー）
-      recordSaveLog('保存', [scope], 'error', msg);
+      recordSaveLog('保存', (e.partialResults && e.partialResults.scopes) || [], 'error', msg);
     } finally {
       btnSave.textContent = "保存";
       btnSave.disabled = false;
