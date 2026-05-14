@@ -5372,12 +5372,25 @@ document.addEventListener("focusin", function(e) {
   }
 });
 
+// Phase 17: ボタン操作（クリア等）中は focusout 自動次移動を抑制する。
+// iOS では button がタップ時にフォーカスを受けず、confirm 後の activeElement も
+// body になるため、activeElement 判定だけではクリアボタン押下時に次 input へ
+// 誤移動してしまう。pointerdown（focusout より前に発火）でフラグを立てる。
+var suppressAutoAdvance = false;
+document.addEventListener("pointerdown", function(e) {
+  if (e.target && e.target.closest && e.target.closest("button")) {
+    suppressAutoAdvance = true;
+    setTimeout(function() { suppressAutoAdvance = false; }, 500);
+  }
+}, true);
+
 // iOS自動次移動: blur後300msで別inputにフォーカスが移っていなければ次へ
 document.addEventListener("focusout", function(e) {
   if (e.target.tagName !== "INPUT") return;
   if (e.target.type !== "number" && e.target.type !== "text") return;
   var blurredInput = e.target;
   setTimeout(function() {
+    if (suppressAutoAdvance) return;
     var active = document.activeElement;
     // 別のinputに既にフォーカスが移っている → 何もしない
     if (active && active.tagName === "INPUT" && (active.type === "number" || active.type === "text")) {
