@@ -2126,6 +2126,13 @@ function storageKey() {
   return "kake_weekly_" + (weeklyData.targetMonth || "default");
 }
 
+// Phase 19-E': YYYY-MM 正規化。ISO タイムスタンプや YYYY-MM-DD から YYYY-MM を抽出する。
+// 純粋関数（DOM に触れない）。YYYY-MM 値には no-op、ISO 値は先頭 7 文字を切り出す。
+function normalizeMonthValue(v) {
+  var s = String(v == null ? '' : v);
+  return s.slice(0, 7);
+}
+
 function currentYearMonth() {
   const d = new Date();
   return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
@@ -3225,6 +3232,8 @@ function loadFromStorage() {
     if (raw) {
       const parsed = JSON.parse(raw);
       weeklyData = Object.assign({ startDate: "", targetMonth: "", weeks: {}, equipment: {}, electrical: {}, mechanical: {} }, parsed);
+      // Phase 19-E': localStorage 由来の ISO 汚染値を YYYY-MM に正規化
+      weeklyData.targetMonth = normalizeMonthValue(weeklyData.targetMonth);
     }
   } catch (e) {}
   ensureWeeklyStructure();
@@ -3441,16 +3450,16 @@ function mergeServerData(serverData, expectedMonth) {
   const summary = { water_days: 0, equipment_weeks: 0, electrical_days: 0, mechanical_days: 0, merged: false };
   if (!serverData) return summary;
 
-  // Phase 14: 月キー流入防止
+  // Phase 14: 月キー流入防止 / Phase 19-E': 比較は両辺 YYYY-MM 正規化で寛容化
   // (1) 同期開始時の対象月と現在の対象月が違う(同期中にユーザーが月切替) → abort
-  if (expectedMonth && expectedMonth !== weeklyData.targetMonth) {
-    console.warn('[Sync] Target month changed during sync (expected=' + expectedMonth + ', current=' + weeklyData.targetMonth + '). Aborting merge.');
+  if (expectedMonth && normalizeMonthValue(expectedMonth) !== normalizeMonthValue(weeklyData.targetMonth)) {
+    console.debug('[Sync] Target month changed during sync (expected=' + expectedMonth + ', current=' + weeklyData.targetMonth + '). Aborting merge.');
     return summary;
   }
   // (2) レスポンスに月情報があり、対象月と一致しない → abort
   const responseMonth = serverData.month || serverData.targetMonth || null;
-  if (responseMonth && responseMonth !== weeklyData.targetMonth) {
-    console.warn('[Sync] Month mismatch (targetMonth=' + weeklyData.targetMonth + ', response.month=' + responseMonth + '). Aborting merge.');
+  if (responseMonth && normalizeMonthValue(responseMonth) !== normalizeMonthValue(weeklyData.targetMonth)) {
+    console.debug('[Sync] Month mismatch (targetMonth=' + weeklyData.targetMonth + ', response.month=' + responseMonth + '). Aborting merge.');
     return summary;
   }
 
@@ -5222,7 +5231,8 @@ async function continueInit() {
   updateUserInfoUI();
   renderEquipTableRows();
   // 対象月：前回保存 or 現在月
-  const savedMonth = localStorage.getItem("kake_current_month");
+  // Phase 19-E': localStorage 由来の ISO 汚染値を YYYY-MM に正規化してから代入
+  const savedMonth = normalizeMonthValue(localStorage.getItem("kake_current_month"));
   const ym = savedMonth || currentYearMonth();
   weeklyData.targetMonth = ym;
 
@@ -5249,7 +5259,8 @@ async function continueInit() {
   loadDataToForm();
 
   // b. バックグラウンドでGASからデータ取得（接続確認を兼ねる）
-  syncFromServer().then(() => updateMldoStatus()).catch(() => {});
+  // Phase 19-E': サイレント失敗を debug ログで可視化（処理継続は変更なし）
+  syncFromServer().then(() => updateMldoStatus()).catch(e => console.debug('[init sync] failed (non-fatal):', e));
   // 祝日リストもバックグラウンド取得（キャッシュがあれば上書き・なければ取得）
   fetchHolidaysFromServer();
 }
