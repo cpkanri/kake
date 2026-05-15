@@ -2572,7 +2572,7 @@ function computeElectricalUsage(month, week, day, sourceKey) {
 
 // 単一セル再計算: 1曜日 × 1ペアの使用量を weeklyData に反映
 // Phase 17-b: autoCalc 項目は UI に描画されないため DOM 書き換えは行わない。
-// 値の参照経路: saveCurrentToServer / fillElecSheet が weeklyData.electrical[w][d][useKey] を直接読む。
+// 値の参照経路: saveSheetToServer (uploadAllTabs 経由) / fillElecSheet が weeklyData.electrical[w][d][useKey] を直接読む。
 function recomputeElecAutoCalcCell(day, sourceKey) {
   let useKey = null;
   for (const k in ELEC_AUTO_CALC_PAIRS) {
@@ -3287,59 +3287,6 @@ function buildWaterDaysPayload(weekIdx) {
     days[gasKey] = payload;
   });
   return days;
-}
-
-async function saveCurrentToServer() {
-  let payload;
-  if (currentSheet === "water") {
-    payload = {
-      action: 'saveWeek',
-      month: weeklyData.targetMonth,
-      week: currentWeek,
-      startDate: weeklyData.startDate,
-      days: buildWaterDaysPayload(currentWeek)
-    };
-  } else if (currentSheet === "equip") {
-    payload = {
-      action: 'saveEquipment',
-      month: weeklyData.targetMonth,
-      equipment: { [currentWeek]: weeklyData.equipment[currentWeek] }
-    };
-  } else if (currentSheet === "elec") {
-    payload = {
-      action: 'saveElectrical',
-      month: weeklyData.targetMonth,
-      week: currentWeek,
-      electrical: { [currentWeek]: weeklyData.electrical[currentWeek] }
-    };
-  } else if (currentSheet === "mech") {
-    payload = {
-      action: 'saveMechanical',
-      month: weeklyData.targetMonth,
-      week: currentWeek,
-      mechanical: { [currentWeek]: weeklyData.mechanical[currentWeek] }
-    };
-  }
-  console.log('送信データ:', JSON.stringify(payload).substring(0, 500));
-  let res;
-  try {
-    res = await fetchWithTimeout(GAS_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain' },
-      body: JSON.stringify(withTokenBody(payload))
-    }, 15000);
-  } catch (fetchErr) {
-    throw new Error('通信失敗: ' + (fetchErr && fetchErr.message ? fetchErr.message : fetchErr));
-  }
-  if (!res.ok) throw new Error('HTTP ' + res.status);
-  const text = await res.text();
-  let result;
-  try { result = JSON.parse(text); }
-  catch (pe) { throw new Error('JSONパース失敗: ' + text.substring(0, 150)); }
-  console.log('レスポンス:', JSON.stringify(result));
-  if (result && result.authRequired) { handleAuthFailure(); throw new Error('認証が切れました'); }
-  if (result && result.error) throw new Error('GASエラー: ' + result.error);
-  return result;
 }
 
 // 1シート全週を送信（全同期用）
