@@ -4303,6 +4303,25 @@ function formatHyphenForOutput(value) {
   return value;
 }
 
+// Phase 22: 機械設備の数値型フィールドキー集合（MECH_SECTIONS から type==="number" を抽出）
+const MECH_NUMERIC_KEYS = (function() {
+  const set = new Set();
+  MECH_SECTIONS.forEach(function(sec) {
+    sec.fields.forEach(function(f) {
+      if (f.type === "number") set.add(f.key);
+    });
+  });
+  return set;
+})();
+
+// Phase 22: 数値型機械フィールドの未入力セルへ「ー」を出力する判定
+// 数値型 + 未入力 → "ー"、それ以外（トグル等 or 値あり） → null（既存どおり空）
+function getMechEmptyValue(fieldKey, value) {
+  if (!MECH_NUMERIC_KEYS.has(fieldKey)) return null;
+  if (value === null || value === undefined || value === "") return "ー";
+  return null;
+}
+
 function setCell(ws, row, col, val) {
   if (val === null || val === undefined || val === "") return;
   const cell = ws.getCell(row, col);
@@ -5068,12 +5087,25 @@ function fillMechSheet(ws, yyyy, mm) {
       const day = wData[dk];
       if (!day) continue;
       // 1/2 ページ: 絶対行(週1基準) + p1 オフセット
+      // Phase 22: 数値型フィールドの未入力セルは「ー」を出力（トグル系は従来どおり空）
       for (const key in MAP1) {
-        setCell(ws, MAP1[key] + wk.p1, col, day[key]);
+        const row1 = MAP1[key] + wk.p1;
+        const val1 = day[key];
+        if (val1 === null || val1 === undefined || val1 === "") {
+          ws.getCell(row1, col).value = getMechEmptyValue(key, val1);
+        } else {
+          setCell(ws, row1, col, val1);
+        }
       }
       // 2/2 ページ: 絶対行(週1基準) + (wk.p2 - 66) で各週の page2 ブロックへ
       for (const key in MAP2) {
-        setCell(ws, MAP2[key] + wk.p2 - 66, col, day[key]);
+        const row2 = MAP2[key] + wk.p2 - 66;
+        const val2 = day[key];
+        if (val2 === null || val2 === undefined || val2 === "") {
+          ws.getCell(row2, col).value = getMechEmptyValue(key, val2);
+        } else {
+          setCell(ws, row2, col, val2);
+        }
       }
     }
   }
