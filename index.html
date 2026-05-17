@@ -4294,12 +4294,13 @@ function loadScript(src) {
   });
 }
 
-// Phase 12 補追: Excel出力時にハイフン類を「ー」(U+30FC) に統一
-// 単一のハイフン類文字 (- / － / ー / − / – / — / ―) なら U+30FC「ー」を返す。
+// Phase 12 補追: Excel出力時にハイフン類を統一
+// Phase 22 補追 2: MS P明朝での U+30FC レンダリング不良のため U+002D (ASCII hyphen-minus) に統一
+// 単一のハイフン類文字 (- / － / ー / − / – / — / ―) なら "-" (U+002D) を返す。
 // それ以外（数値文字列、複数文字を含む文字列）はそのまま返す。
 function formatHyphenForOutput(value) {
   if (typeof value !== 'string') return value;
-  if (/^[-－ー−–—―]$/.test(value)) return 'ー';
+  if (/^[-－ー−–—―]$/.test(value)) return '-';
   return value;
 }
 
@@ -4314,22 +4315,24 @@ const MECH_NUMERIC_KEYS = (function() {
   return set;
 })();
 
-// Phase 22: 数値型機械フィールドの未入力セルへ「ー」を出力する判定
-// 数値型 + 未入力 → "ー"、それ以外（トグル等 or 値あり） → null（既存どおり空）
+// Phase 22: 数値型機械フィールドの未入力セルへハイフンを出力する判定
+// Phase 22 補追 2: 出力文字を "-" (U+002D) に変更（MS P明朝での U+30FC 表示崩れ回避）
+// 数値型 + 未入力 → "-"、それ以外（トグル等 or 値あり） → null（既存どおり空）
 function getMechEmptyValue(fieldKey, value) {
   if (!MECH_NUMERIC_KEYS.has(fieldKey)) return null;
-  if (value === null || value === undefined || value === "") return "ー";
+  if (value === null || value === undefined || value === "") return "-";
   return null;
 }
 
-// Phase 22 補追: 数値型未入力セルへ「ー」を書く専用ヘルパー
-// 元セル書式が数値書式 ("0.0"/"0.00" 等) のままだと文字列「ー」がレンダリング崩れを起こすため、
+// Phase 22 補追: 数値型未入力セルへハイフンを書く専用ヘルパー
+// 元セル書式が数値書式 ("0.0"/"0.00" 等) のままだと文字列ハイフンがレンダリング崩れを起こすため、
 // value 設定後に numFmt="@" (テキスト形式) を付与する。null 書き込み時は numFmt を触らない。
+// Phase 22 補追 2: 出力文字を U+002D "-" に変更
 function writeMechEmptyCell(ws, row, col, fieldKey, val) {
   var emptyVal = getMechEmptyValue(fieldKey, val);
   var cell = ws.getCell(row, col);
   cell.value = emptyVal;
-  if (emptyVal === "ー") cell.numFmt = "@";
+  if (emptyVal === "-") cell.numFmt = "@";
 }
 
 function setCell(ws, row, col, val) {
