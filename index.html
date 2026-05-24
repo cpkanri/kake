@@ -4851,7 +4851,14 @@ function fillWaterSheet(ws, yyyy, mm, holidaySet) {
 function fillReportFinalData(wb, yyyy, mm) {
   const ws = wb.getWorksheet("水質管理報告");
   if (!ws) return;
-  const FINAL_COLS = { tempFinal: 5, phFinal: 9, transFinal: 12 }; // E, I, L
+  // Phase 38-b2+ Step 2: FINAL_COLS の col 値を MAP 由来動的算出
+  // excel-write-map.js の monthly.col 値を参照、起動時 verify で整合性保証
+  const _writeMap = window.EXCEL_WRITE_MAP;
+  const FINAL_COLS = {
+    tempFinal:  _writeMap.tempFinal.monthly.col,   // 期待値: 5 (E列)
+    phFinal:    _writeMap.phFinal.monthly.col,     // 期待値: 9 (I列)
+    transFinal: _writeMap.transFinal.monthly.col   // 期待値: 12 (L列)
+  };
   for (let w = 1; w <= 5; w++) {
     const wkObj = weeklyData.weeks[w];
     if (!wkObj) continue;
