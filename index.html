@@ -3430,7 +3430,10 @@ function mergeServerData(serverData, expectedMonth) {
                 // Phase 23-B-1 (kamitono Phase 23-A 補追2-b 横展開):
                 // 終沈3キーは GAS WATER_MAIN_FIELDS 未登録 / 列未書込の場合
                 // null/空が返るため、サーバー値が空ならローカルを保持（null 上書きで消える事象の対策）
-                if ((k === 'tempFinal' || k === 'transFinal' || k === 'phFinal') &&
+                // Phase 38-b2+ Step1: null skip 3キー判定を動的算出 (excel-write-map.js より)
+                // window.EXCEL_WRITE_MAP_NULL_SKIP_KEYS_DIRECT 未定義時 (ロード失敗) は判定 false でフェイルセーフ
+                if (window.EXCEL_WRITE_MAP_NULL_SKIP_KEYS_DIRECT &&
+                    window.EXCEL_WRITE_MAP_NULL_SKIP_KEYS_DIRECT.indexOf(k) >= 0 &&
                     (src[k] === null || src[k] === undefined || src[k] === '')) return;
                 target[k] = src[k];
               });
