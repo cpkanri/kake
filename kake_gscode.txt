@@ -907,3 +907,162 @@ function __tempSetupHolidays() {
        Logger.log(setupHolidays());
      }
      
+// ============================================================================
+// Phase 39-B 一時関数 (完了後削除予定、2026-05-25 追加)
+// 加計 SS の上部 Excel テンプレ模倣枠を排除し、フラットなデータ蓄積構造に統一
+// 関数: migrateTab_Phase39B / migrateStep1_Phase39B / swapStep1_Phase39B / cleanupBackup_Phase39B
+// ============================================================================
+
+/**
+ * Phase 39-B: 汎用 タブ移行関数
+ * 旧タブ → 新タブ (上部テンプレ枠を排除しフラット構造に)
+ *
+ * 抽出ロジック: A 列が `YYYY-MM` 形式の行のみ抽出 (テンプレ枠の空セル行は自動除外)
+ * 既存の新タブがある場合は削除して再作成 (idempotent、再実行可能)
+ *
+ * @param {string} srcName - 元タブ名 (例: '日常水質')
+ * @param {string} dstName - 新タブ名 (例: '日常水質_新')
+ * @param {Array<string>} headerRow - Row 1 に書き込むヘッダ
+ * @param {number} colCount - 取得・書込列数
+ * @returns {Object} 結果サマリ
+ */
+function migrateTab_Phase39B(srcName, dstName, headerRow, colCount) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var src = ss.getSheetByName(srcName);
+  if (!src) throw new Error('Source not found: ' + srcName);
+
+  // 既存の新タブを削除 (idempotent、再実行可能性のため)
+  var existingDst = ss.getSheetByName(dstName);
+  if (existingDst) ss.deleteSheet(existingDst);
+
+  // 新タブ作成 (末尾に挿入)
+  var dst = ss.insertSheet(dstName);
+
+  // Row 1 ヘッダ書込 + フリーズ
+  dst.getRange(1, 1, 1, headerRow.length).setValues([headerRow]);
+  dst.setFrozenRows(1);
+
+  // 元タブから全データ取得
+  var lr = src.getLastRow();
+  if (lr <= 1) {
+    Logger.log(srcName + ' → ' + dstName + ': 0 行 (元タブが空)');
+    return { src: srcName, dst: dstName, srcRows: 0, migrated: 0 };
+  }
+
+  var data = src.getRange(1, 1, lr, colCount).getValues();
+
+  // A 列が `YYYY-MM` 形式の行のみ抽出 (テンプレ枠の空セル行は自動除外)
+  var filtered = data.filter(function(row) {
+    var v = row[0];
+    if (!v) return false;
+    if (typeof v === 'string' && /^\d{4}-\d{2}$/.test(v.trim())) return true;
+    return false;
+  });
+
+  // 新タブの Row 2+ に一括書込
+  if (filtered.length > 0) {
+    dst.getRange(2, 1, filtered.length, colCount).setValues(filtered);
+  }
+
+  // ソート (month, week, day 順、Phase 39-A2 §6.2 の sortSheet と同じ並び)
+  if (filtered.length > 1) {
+    dst.getRange(2, 1, filtered.length, colCount).sort([
+      {column: 1, ascending: true}, {column: 2, ascending: true}, {column: 3, ascending: true}
+    ]);
+  }
+
+  var result = { src: srcName, dst: dstName, srcRows: lr, migrated: filtered.length };
+  Logger.log(srcName + ' → ' + dstName + ': ' + filtered.length + ' 行移行 (元 ' + lr + ' 行)');
+  return result;
+}
+
+/**
+ * Phase 39-B Step 1: 機械設備 + 日常水質 移行
+ * 第 1 弾 (効果検証のため 2 タブのみ)
+ */
+function migrateStep1_Phase39B() {
+  // 日常水質ヘッダを FIELD_MAP から動的構築 (34 列)
+  var waterHeader = ['月', '週', '曜日', '日付'];
+  for (var f in FIELD_MAP) waterHeader.push(f);
+  waterHeader.push('updatedAt');
+
+  var results = [];
+
+  // 日常水質 (34 列、上部 Row 1-229 排除予定)
+  results.push(migrateTab_Phase39B(
+    '日常水質', '日常水質_新',
+    waterHeader,
+    34
+  ));
+
+  // 日常機械設備 (5 列、上部 Row 1-660 排除予定)
+  results.push(migrateTab_Phase39B(
+    '日常機械設備', '日常機械設備_新',
+    ['月', '週', '曜日', 'データJSON', 'updatedAt'],
+    5
+  ));
+
+  Logger.log('===== Phase 39-B Step 1 移行完了 =====');
+  Logger.log(JSON.stringify(results, null, 2));
+  return results;
+}
+
+/**
+ * Phase 39-B Step 1 swap: タブ名スワップ
+ * Yamane が新タブを目視確認した後に実行
+ * 旧タブを「{元タブ名}_旧_yyyymmdd」にリネーム + 新タブを正式名に
+ */
+function swapStep1_Phase39B() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var today = Utilities.formatDate(new Date(), 'JST', 'yyyyMMdd');
+  var pairs = [
+    ['日常水質', '日常水質_新'],
+    ['日常機械設備', '日常機械設備_新']
+  ];
+
+  var results = [];
+  pairs.forEach(function(p) {
+    var orig = p[0], temp = p[1];
+    var origSheet = ss.getSheetByName(orig);
+    var tempSheet = ss.getSheetByName(temp);
+    if (!origSheet) { results.push({ pair: p, status: 'skip', reason: 'orig not found' }); return; }
+    if (!tempSheet) { results.push({ pair: p, status: 'skip', reason: 'temp not found' }); return; }
+
+    var bakName = orig + '_旧_' + today;
+    // 既に同名のバックアップがあれば suffix 追加
+    var counter = 1;
+    while (ss.getSheetByName(bakName)) { bakName = orig + '_旧_' + today + '_' + counter; counter++; }
+
+    origSheet.setName(bakName);
+    tempSheet.setName(orig);
+    results.push({ pair: p, status: 'OK', renamed: { orig: bakName, temp: orig } });
+  });
+
+  Logger.log('===== Phase 39-B Step 1 swap 完了 =====');
+  Logger.log(JSON.stringify(results, null, 2));
+  return results;
+}
+
+/**
+ * Phase 39-B: バックアップタブを削除 (一定期間運用後に手動実行)
+ * 「_旧_」を含むタブ名を全削除
+ */
+function cleanupBackup_Phase39B() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheets = ss.getSheets();
+  var deleted = [];
+  sheets.forEach(function(s) {
+    var name = s.getName();
+    if (name.indexOf('_旧_') >= 0) {
+      ss.deleteSheet(s);
+      deleted.push(name);
+    }
+  });
+  Logger.log('===== Phase 39-B Backup タブ削除 =====');
+  Logger.log('Deleted: ' + JSON.stringify(deleted));
+  return deleted;
+}
+
+// ============================================================================
+// Phase 39-B 一時関数ここまで
+// ============================================================================
