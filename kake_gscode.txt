@@ -1045,7 +1045,7 @@ function swapStep1_Phase39B() {
 
 /**
  * Phase 39-B: バックアップタブを削除 (一定期間運用後に手動実行)
- * 「_旧_」を含むタブ名を全削除
+ * 「_旧_」を含むタブ名 + Phase 39 移行作業中に残った空タブ「シート3」を削除
  */
 function cleanupBackup_Phase39B() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -1053,7 +1053,8 @@ function cleanupBackup_Phase39B() {
   var deleted = [];
   sheets.forEach(function(s) {
     var name = s.getName();
-    if (name.indexOf('_旧_') >= 0) {
+    // Phase 25-c-α: シート3 (Phase 39 移行作業中の空タブ) も削除対象に追加
+    if (name.indexOf('_旧_') >= 0 || name === 'シート3') {
       ss.deleteSheet(s);
       deleted.push(name);
     }
