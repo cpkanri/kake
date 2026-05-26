@@ -718,21 +718,81 @@ function saveAllData(data) {
 }
 
 // ===== 機器運転時間 =====
+// Phase 25-c-α: N+1 setValue ループを setValues バッチに圧縮 (memory #28 signal aborted 対策)
+// 旧: findEquipRow が iteration ごとに getValues、各行ごとに setValues/appendRow
+//     → 最大 5 週 × 21 機器 = 105 iteration × 2 GAS API call = 210 往復で 30s 超
+// 新: 既存全行を 1 回の getValues で読込 → in-memory で update/append 判定
+//     → 連続更新区間ごとに setValues 1 回 + 新規分末尾 setValues 1 回 (典型 1〜数回)
 function saveEquipmentData(data) {
-  var month=data.month,eq=data.equipment; if(!month||!eq) return jsonResponse({error:'パラメータ不足'});
-  var ss=SpreadsheetApp.getActiveSpreadsheet(),sheet=ss.getSheetByName('機器運転時間');
-  if(!sheet) return jsonResponse({error:'シートなし'}); var now=new Date(),cnt=0;
-  for(var wn in eq){var wd=eq[wn]; for(var e=0;e<EQUIP_NAMES.length;e++){
-    var ek=EQUIP_NAMES[e],el=EQUIP_LABELS[e],ed=wd[ek]; if(!ed)continue;
-    var ri=findEquipRow(sheet,month,parseInt(wn),el);
-    var rv=[month,parseInt(wn),el,ed.mon!=null?ed.mon:'',ed.tue!=null?ed.tue:'',ed.wed!=null?ed.wed:'',ed.thu!=null?ed.thu:'',ed.fri!=null?ed.fri:'',now];
-    if(ri>0){sheet.getRange(ri,1,1,rv.length).setValues([rv]);}else{sheet.appendRow(rv);} cnt++;
-  }} return jsonResponse({status:'ok',message:'機器'+cnt+'件保存',savedCount:cnt});
-}
-function findEquipRow(sheet,month,week,label) {
-  var lr=sheet.getLastRow(); if(lr<=1) return -1;
-  var d=sheet.getRange(2,1,lr-1,3).getValues();
-  for(var i=0;i<d.length;i++){if(matchMonth(d[i][0],month)&&d[i][1]===week&&d[i][2]===label) return i+2;} return -1;
+  var month = data.month, eq = data.equipment;
+  if (!month || !eq) return jsonResponse({error:'パラメータ不足'});
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('機器運転時間');
+  if (!sheet) return jsonResponse({error:'シートなし'});
+  var now = new Date();
+
+  // 列構成: [month, week, label, mon, tue, wed, thu, fri, updatedAt]
+  var COL_COUNT = 9;
+  var lr = sheet.getLastRow();
+  var existing = lr > 1 ? sheet.getRange(2, 1, lr - 1, 3).getValues() : [];
+  // "month|week|label" → 1-based row index。
+  // 他月の行は @ プレフィクスで別 key 化し、新入力 month キーと衝突しないようにする。
+  var rowMap = {};
+  for (var i = 0; i < existing.length; i++) {
+    var monKey = matchMonth(existing[i][0], month) ? month : ('@' + String(existing[i][0]));
+    rowMap[monKey + '|' + existing[i][1] + '|' + existing[i][2]] = i + 2;
+  }
+
+  var updates = []; // { rowIndex, values }
+  var appends = []; // values[]
+  var cnt = 0;
+  for (var wn in eq) {
+    var wd = eq[wn];
+    var wnInt = parseInt(wn);
+    for (var e = 0; e < EQUIP_NAMES.length; e++) {
+      var ek = EQUIP_NAMES[e], el = EQUIP_LABELS[e], ed = wd[ek];
+      if (!ed) continue; // Phase 23-B-3 null skip 維持
+      var rv = [
+        month, wnInt, el,
+        ed.mon != null ? ed.mon : '',
+        ed.tue != null ? ed.tue : '',
+        ed.wed != null ? ed.wed : '',
+        ed.thu != null ? ed.thu : '',
+        ed.fri != null ? ed.fri : '',
+        now
+      ];
+      var ri = rowMap[month + '|' + wnInt + '|' + el];
+      if (ri) {
+        updates.push({ rowIndex: ri, values: rv });
+      } else {
+        appends.push(rv);
+      }
+      cnt++;
+    }
+  }
+
+  // 既存行更新: 行 index 昇順 → 連続区間ごとに setValues 1 回
+  updates.sort(function(a, b) { return a.rowIndex - b.rowIndex; });
+  var u = 0;
+  while (u < updates.length) {
+    var startRow = updates[u].rowIndex;
+    var block = [updates[u].values];
+    var u2 = u + 1;
+    while (u2 < updates.length && updates[u2].rowIndex === updates[u2 - 1].rowIndex + 1) {
+      block.push(updates[u2].values);
+      u2++;
+    }
+    sheet.getRange(startRow, 1, block.length, COL_COUNT).setValues(block);
+    u = u2;
+  }
+
+  // 新規行: 末尾に setValues 1 回で一括 append
+  if (appends.length > 0) {
+    var appendStartRow = sheet.getLastRow() + 1;
+    sheet.getRange(appendStartRow, 1, appends.length, COL_COUNT).setValues(appends);
+  }
+
+  return jsonResponse({status:'ok', message:'機器'+cnt+'件保存', savedCount:cnt});
 }
 
 // ===== 電気設備 =====
