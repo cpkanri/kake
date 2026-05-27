@@ -1129,3 +1129,107 @@ function cleanupBackup_Phase39B() {
 // ============================================================================
 // Phase 39-B 一時関数ここまで
 // ============================================================================
+
+// ============================================================================
+// Phase 25-c-ζ: 機器運転時間 ghost row cleanup (one-shot utility)
+// 2026-05-27 追加。Phase 14 (localStorage ファントムキー cleanup) 以前に SS へ伝播した
+// W0 / W6+ の空殻 row (D-H 列が全て null、機器名のみ GAS テンプレ自動生成由来) を削除する。
+// 対象月は 2026-04 / 2026-05 のみ。将来月の test row はノータッチ。
+// 削除は idempotent (2 度実行しても再削除されない)。再発が無ければ削除可能。
+// ============================================================================
+function cleanupOrphanWeeks_phase25c_zeta(dryRun) {
+  if (dryRun === undefined) dryRun = true; // safety default
+
+  var startedAt = new Date();
+  Logger.log('===== Phase 25-c-ζ cleanup start: ' + startedAt.toISOString() + ' =====');
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('機器運転時間');
+  if (!sheet) throw new Error('機器運転時間 sheet not found');
+
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) {
+    Logger.log('lastRow < 2, nothing to scan');
+    return { scanned: 0, deleted: 0, kept: 0, dryRun: dryRun };
+  }
+
+  // Read A〜H (8 列) を一括取得。A=月, B=週, C=機器名, D=月, E=火, F=水, G=木, H=金
+  var range = sheet.getRange(2, 1, lastRow - 1, 8);
+  var values = range.getValues();
+
+  var deleteIndices = []; // 1-indexed row numbers (SS の絶対 row 番号)
+  var scanned = 0;
+  var kept = 0;
+
+  for (var i = 0; i < values.length; i++) {
+    var row = values[i];
+    var rowNum = i + 2; // 1-indexed (header row が 1 のため +2)
+    var monthCell = row[0];     // A: 月
+    var weekCell = row[1];      // B: 週
+    var equipName = row[2];     // C: 機器名 (ログ出力用)
+    var monFri = [row[3], row[4], row[5], row[6], row[7]]; // D-H 列 (月火水木金)
+
+    if (monthCell === null || monthCell === undefined || monthCell === '') continue;
+    scanned++;
+
+    // Normalize month to YYYY-MM string (Date 型 / 文字列 両対応)
+    var mKey;
+    if (monthCell instanceof Date) {
+      mKey = Utilities.formatDate(monthCell, Session.getScriptTimeZone(), 'yyyy-MM');
+    } else {
+      mKey = String(monthCell).substring(0, 7);
+    }
+
+    // 対象月: 2026-04 / 2026-05 のみ。それ以外は kept (将来月 test row 等)。
+    if (mKey !== '2026-04' && mKey !== '2026-05') {
+      kept++;
+      continue;
+    }
+
+    var week = Number(weekCell);
+    var isGhostWeek = (!isNaN(week) && (week === 0 || week > 5));
+    var allEmpty = monFri.every(function(v) { return v === null || v === undefined || v === ''; });
+
+    if (isGhostWeek && allEmpty) {
+      deleteIndices.push(rowNum);
+      // 最初の数件のみ詳細ログ (Logger 上限対策)
+      if (deleteIndices.length <= 10) {
+        Logger.log('  delete candidate row=' + rowNum + ', month=' + mKey + ', week=' + week + ', name=' + equipName);
+      }
+    } else {
+      kept++;
+    }
+  }
+
+  var deleted = deleteIndices.length;
+
+  Logger.log('--- scan summary ---');
+  Logger.log('dryRun: ' + dryRun);
+  Logger.log('scanned: ' + scanned);
+  Logger.log('delete candidates: ' + deleted);
+  Logger.log('kept: ' + kept);
+  if (deleted > 0) {
+    Logger.log('first 5 delete candidates: ' + JSON.stringify(deleteIndices.slice(0, 5)));
+    Logger.log('last 5 delete candidates: ' + JSON.stringify(deleteIndices.slice(-5)));
+  }
+
+  if (!dryRun && deleted > 0) {
+    // index ずれ防止のため下から上へ削除
+    var reversed = deleteIndices.slice().reverse();
+    for (var j = 0; j < reversed.length; j++) {
+      sheet.deleteRow(reversed[j]);
+      if ((j + 1) % 100 === 0) {
+        Logger.log('Progress: ' + (j + 1) + '/' + reversed.length + ' rows deleted');
+      }
+    }
+    Logger.log('All rows deleted. New lastRow: ' + sheet.getLastRow());
+  } else if (dryRun) {
+    Logger.log('(dryRun=true: no rows were actually deleted)');
+  }
+
+  var finishedAt = new Date();
+  Logger.log('===== Phase 25-c-ζ cleanup end: ' + finishedAt.toISOString() +
+    ' (elapsed ' + ((finishedAt.getTime() - startedAt.getTime()) / 1000).toFixed(1) + 's) =====');
+
+  return { scanned: scanned, deleted: deleted, kept: kept, dryRun: dryRun };
+}
