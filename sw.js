@@ -1,5 +1,5 @@
 // 加計浄化センター 週報 Service Worker
-const CACHE_NAME = 'kake-v30';
+const CACHE_NAME = 'kake-v31';
 const ASSETS = [
   './',
   './index.html',
@@ -21,7 +21,9 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) => Promise.all(
       keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))
-    )).then(() => self.clients.claim())
+    )).then(() => self.clients.claim()).then(() => {
+      console.log('SW: ' + CACHE_NAME.replace('kake-', '') + ' activated');
+    })
   );
 });
 

@@ -1115,7 +1115,7 @@ header > .conn-status {
   <button type="button" data-day="tue"><span class="check"></span>火<span class="day-date"></span></button>
   <button type="button" data-day="wed"><span class="check"></span>水<span class="day-date"></span></button>
   <button type="button" data-day="thu"><span class="check"></span>木<span class="day-date"></span></button>
-  <button type="button" data-day="nextMon"><span class="check"></span>金<span class="day-date"></span></button>
+  <button type="button" data-day="fri"><span class="check"></span>金<span class="day-date"></span></button>
 </nav>
 
 <!-- 入力フォーム（static HTML） -->
@@ -1613,15 +1613,19 @@ const COPY_FIELDS = [
   "tempFinal", "transFinal", "phFinal"
 ];
 
-const DAYS = ["mon", "tue", "wed", "thu", "nextMon"];
-const DAY_LABELS = { mon: "月", tue: "火", wed: "水", thu: "木", nextMon: "金" };
+// Phase 25-c-ε (2026-05-27): 水質タブの 5 日目キーを nextMon → fri に統一。
+// 同期で server (fri) → localStorage (nextMon) の不整合で空欄表示 → 入力 → save 時の
+// 全 field null 上書きで server data 消失バグ (memory Phase 15) の再発を修正。
+// 起動時 migrateWaterFriKey() が旧 nextMon データを fri に移行する。
+const DAYS = ["mon", "tue", "wed", "thu", "fri"];
+const DAY_LABELS = { mon: "月", tue: "火", wed: "水", thu: "木", fri: "金" };
 const WEEKS = [1, 2, 3, 4, 5];
 
 // 機器運転時間の曜日キー（data-eday属性と一致）
 const EQUIP_DAYS = ["mon", "tue", "wed", "thu", "fri"];
-// 電気・機械タブのキー(fri) → 水質タブのキー(nextMon) への変換マップ
-// 水質タブは nextMon を金曜の意味で使っているため、両者を変換する必要がある
-const APP_KEY_MAP = { mon: "mon", tue: "tue", wed: "wed", thu: "thu", fri: "nextMon" };
+// 全タブで fri に統一済み (Phase 25-c-ε) のため identity map。
+// 既存コードが APP_KEY_MAP を経由してアクセスする箇所が残っているため定義は維持する。
+const APP_KEY_MAP = { mon: "mon", tue: "tue", wed: "wed", thu: "thu", fri: "fri" };
 // 機器キー（data-equip属性と一致）
 // 加計浄化センター 21項目
 const EQUIP_KEYS = [
@@ -2161,7 +2165,7 @@ function computeDate(weekIdx, dayKey) {
   if (!weeklyData.startDate) return "";
   const base = new Date(weeklyData.startDate + "T00:00:00");
   if (isNaN(base.getTime())) return "";
-  const dayOffsetMap = { mon: 0, tue: 1, wed: 2, thu: 3, nextMon: 4 };
+  const dayOffsetMap = { mon: 0, tue: 1, wed: 2, thu: 3, fri: 4 };
   const offsetDays = (weekIdx - 1) * 7 + dayOffsetMap[dayKey];
   const d = new Date(base);
   d.setDate(base.getDate() + offsetDays);
@@ -2274,7 +2278,7 @@ function getActualDate(weekIdx, dayKey) {
   if (!weeklyData.startDate) return null;
   var base = new Date(weeklyData.startDate + "T00:00:00");
   if (isNaN(base.getTime())) return null;
-  var dayOffsetMap = { mon: 0, tue: 1, wed: 2, thu: 3, fri: 4, nextMon: 4 };
+  var dayOffsetMap = { mon: 0, tue: 1, wed: 2, thu: 3, fri: 4 };
   var offsetDays = (weekIdx - 1) * 7 + (dayOffsetMap[dayKey] || 0);
   var d = new Date(base);
   d.setDate(base.getDate() + offsetDays);
@@ -3262,8 +3266,14 @@ function fmtYMD(d) {
   return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
 }
 
-// 水質1週分のデータに date を注入し、nextMon → fri にキー変換して GAS 形式に揃える
+// 水質1週分のデータに date を注入して GAS 形式に揃える
 // 入力なしの日(全フィールドnull)は送信しない → 空行作成防止
+// Phase 25-c-ε (2026-05-27): 全タブ fri に統一済みのため nextMon→fri 変換は撤去。
+// 同 Phase で null/undefined/"" の field を payload から skip (null 上書き防御)。
+//   - 0/false は有効値なので保持 (数値 0 や toggle "切" を消さない)
+//   - bikou は "" でも skip (空文字で上書きしない)
+//   - 数値 0 を含む可能性のある field (sv24h 等) は保持される
+//   - GAS 側 mergeServerData の null skip と対称 (kamitono Phase 23-A 補追2-b と同 pattern)
 function buildWaterDaysPayload(weekIdx) {
   const sourceWeek = weeklyData.weeks[weekIdx] || {};
   const days = {};
@@ -3276,35 +3286,70 @@ function buildWaterDaysPayload(weekIdx) {
       return v !== null && v !== undefined && v !== "";
     });
     if (!hasAnyData) return;
-    // 水質タブはアプリ上 nextMon を金曜の意味で使うため、GAS には fri に変換して送る
-    const gasKey = (appKey === "nextMon") ? "fri" : appKey;
     const dt = getActualDate(weekIdx, appKey);
-    const payload = Object.assign({}, src, { date: fmtYMD(dt) });
+    // null/undefined/"" の field を skip して payload を構築 (Phase 25-c-ε)
+    const payload = { date: fmtYMD(dt) };
+    Object.keys(src).forEach(k => {
+      const v = src[k];
+      if (v === null || v === undefined || v === "") return;
+      payload[k] = v;
+    });
     // Phase 18-b: 送信前に bikou を sanitize（ISO タイムスタンプの再循環を断つ）
     if ('bikou' in payload) {
-      payload.bikou = sanitizeBikou(payload.bikou);
+      const cleaned = sanitizeBikou(payload.bikou);
+      if (cleaned === "" || cleaned === null || cleaned === undefined) {
+        delete payload.bikou;
+      } else {
+        payload.bikou = cleaned;
+      }
     }
-    days[gasKey] = payload;
+    days[appKey] = payload;
   });
   return days;
+}
+
+// Phase 25-c-ε (2026-05-27): payload を構築する際に null/undefined/"" の field を skip。
+// 0/false は有効値なので保持。「同期で空欄化 → null 上書きで server data 消失」事故防御。
+// 機器/電気/機械タブも同じ pattern で適用する。
+function _p25e_stripNulls(obj) {
+  if (obj === null || obj === undefined) return obj;
+  if (Array.isArray(obj)) return obj.map(_p25e_stripNulls);
+  if (typeof obj !== 'object') return obj;
+  const out = {};
+  Object.keys(obj).forEach(k => {
+    const v = obj[k];
+    if (v === null || v === undefined || v === "") return;
+    if (typeof v === 'object') {
+      const inner = _p25e_stripNulls(v);
+      // 空 object は payload に含めない (skip しても server 側で無害)
+      if (inner && typeof inner === 'object' && !Array.isArray(inner) && Object.keys(inner).length === 0) return;
+      out[k] = inner;
+    } else {
+      out[k] = v;
+    }
+  });
+  return out;
 }
 
 // 1シート全週を送信（全同期用）
 async function saveSheetToServer(sheetType) {
   let payload;
   if (sheetType === "water") {
-    // 全週に対して buildWaterDaysPayload を適用（date 注入 + nextMon→fri 変換）
+    // 全週に対して buildWaterDaysPayload を適用 (date 注入 + null skip / Phase 25-c-ε)
     const weeksWithDate = {};
     Object.keys(weeklyData.weeks || {}).forEach(wn => {
       weeksWithDate[wn] = buildWaterDaysPayload(Number(wn));
     });
     payload = { action: 'saveAll', month: weeklyData.targetMonth, startDate: weeklyData.startDate, weeks: weeksWithDate };
   } else if (sheetType === "equip") {
-    payload = { action: 'saveEquipment', month: weeklyData.targetMonth, equipment: weeklyData.equipment };
+    // Phase 25-c-ε: null/undefined/"" を skip して送信 (機器運転時間の null 上書き防御)
+    payload = { action: 'saveEquipment', month: weeklyData.targetMonth, equipment: _p25e_stripNulls(weeklyData.equipment) };
   } else if (sheetType === "elec") {
-    payload = { action: 'saveElectrical', month: weeklyData.targetMonth, electrical: weeklyData.electrical };
+    // Phase 25-c-ε: null/undefined/"" を skip して送信 (電気設備の null 上書き防御)
+    payload = { action: 'saveElectrical', month: weeklyData.targetMonth, electrical: _p25e_stripNulls(weeklyData.electrical) };
   } else if (sheetType === "mech") {
-    payload = { action: 'saveMechanical', month: weeklyData.targetMonth, mechanical: weeklyData.mechanical };
+    // Phase 25-c-ε: null/undefined/"" を skip して送信 (機械設備の null 上書き防御)
+    payload = { action: 'saveMechanical', month: weeklyData.targetMonth, mechanical: _p25e_stripNulls(weeklyData.mechanical) };
   }
   let res;
   try {
@@ -4035,7 +4080,7 @@ function bindEvents() {
   document.getElementById("btnCopy").addEventListener("click", () => {
     if (currentSheet === "water") {
       saveFormToData();
-      const order = ["mon", "tue", "wed", "thu", "nextMon"];
+      const order = ["mon", "tue", "wed", "thu", "fri"];
       const idx = order.indexOf(currentDay);
       const found = findPrevDayWithData("water", currentWeek, idx, order);
       if (!found) {
@@ -4777,11 +4822,13 @@ function getPrevMonthLastDayData(targetMonth, firstMonday, holidaySet) {
   const prevBase = new Date(prevWeekly.startDate + "T00:00:00");
   if (isNaN(prevBase.getTime())) return null;
 
-  const dayOffsetMap = { mon: 0, tue: 1, wed: 2, thu: 3, nextMon: 4 };
+  // Phase 25-c-ε (2026-05-27): 水質タブも fri に統一。旧 nextMon キーの前月データは
+  // migrateWaterFriKey で fri に移行済みなので、ここでは fri を参照すれば前月分も読める。
+  const dayOffsetMap = { mon: 0, tue: 1, wed: 2, thu: 3, fri: 4 };
   for (let wk = 1; wk <= 5; wk++) {
     const wkData = prevWeekly.weeks[wk];
     if (!wkData) continue;
-    ["mon", "tue", "wed", "thu", "nextMon"].forEach(dk => {
+    ["mon", "tue", "wed", "thu", "fri"].forEach(dk => {
       const dd = wkData[dk];
       if (!dd) return;
       const offsetDays = (wk - 1) * 7 + dayOffsetMap[dk];
@@ -4885,7 +4932,7 @@ function fillWaterSheet(ws, yyyy, mm, holidaySet) {
     }
 
     // ===== 各曜日データを書き込み =====
-    // アプリ側のデータキー: mon, tue, wed, thu, nextMon（アプリ上は「金」ラベル）
+    // アプリ側のデータキー: mon, tue, wed, thu, fri (Phase 25-c-ε で nextMon → fri に統一)
     // 加計: 積算値テーブル(Row4-12)用の列マッピング: I列起点
     const DAY_COL_RUISAN = { mon: 9, tue: 10, wed: 11, thu: 12, fri: 13 };
     // 加計: 測定場所テーブル(Row16以降)用の列マッピング: J列起点（I列はラベル）
@@ -4941,9 +4988,8 @@ function fillReportFinalData(wb, yyyy, mm) {
   for (let w = 1; w <= 5; w++) {
     const wkObj = weeklyData.weeks[w];
     if (!wkObj) continue;
-    for (const dk of ["mon", "tue", "wed", "thu", "nextMon"]) {
-      const ek = (dk === "nextMon") ? "fri" : dk;
-      const actual = getActualDate(w, ek);
+    for (const dk of ["mon", "tue", "wed", "thu", "fri"]) {
+      const actual = getActualDate(w, dk);
       if (!actual) continue;
       if (actual.getFullYear() !== yyyy || (actual.getMonth() + 1) !== mm) continue;
       const dayData = wkObj[dk];
@@ -4964,8 +5010,8 @@ function fillKakeOperationReportSheet(wb, yyyy, mm) {
   if (!ws) return;
 
   // ===== 1日のデータを取得 =====
-  // 加計の DAYS = ["mon","tue","wed","thu","nextMon"] (金曜は nextMon キー)
-  const dayKeys = ["mon", "tue", "wed", "thu", "nextMon"];
+  // 加計の DAYS = ["mon","tue","wed","thu","fri"] (Phase 25-c-ε で全タブ fri に統一)
+  const dayKeys = ["mon", "tue", "wed", "thu", "fri"];
   let day1Data = null;
   for (let w = 1; w <= 5; w++) {
     for (const dk of dayKeys) {
@@ -5786,6 +5832,69 @@ function migrateBikouCleanup() {
   }
 }
 try { migrateBikouCleanup(); } catch (e) { console.warn("bikou migration error:", e); }
+
+// ===== Phase 25-c-ε (2026-05-27): 水質タブ nextMon → fri キー移行 =====
+// 旧版 (v30 以前) は水質タブの 5 日目を weeks.N.nextMon に保存していたが、
+// 同期で server (fri) → localStorage (nextMon) の不整合で空欄表示 → 全 null 上書き save の
+// データ消失バグが発生 (memory Phase 15 同型バグの再発 / 2026-05-27 Yamane 実機検証で確認)。
+// Phase 25-c-ε で全タブ fri に統一したため、既存 localStorage の旧 nextMon データを
+// 同 week の fri キーに移行する。fri 側に既存 data がある場合は fri を優先 (新しいキー側を保持)。
+// 二重実行防止: kake_migration_water_fri_v1 フラグ (kake_migration_bikou_v1 と同 pattern)。
+function migrateWaterFriKey() {
+  const MIGRATION_FLAG = "kake_migration_water_fri_v1";
+  try { if (localStorage.getItem(MIGRATION_FLAG)) return; } catch (e) { return; }
+
+  function hasAnyValue(obj) {
+    if (!obj || typeof obj !== "object") return false;
+    for (const k in obj) {
+      const v = obj[k];
+      if (v !== null && v !== undefined && v !== "") return true;
+    }
+    return false;
+  }
+
+  let moved = 0, deleted = 0, scanned = 0;
+  const weeklyKeys = [];
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.indexOf("kake_weekly_") === 0) weeklyKeys.push(k);
+    }
+  } catch (e) {}
+  weeklyKeys.forEach(function (key) {
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      scanned++;
+      if (!parsed || !parsed.weeks || typeof parsed.weeks !== "object") return;
+      let dirty = false;
+      Object.keys(parsed.weeks).forEach(function (w) {
+        const week = parsed.weeks[w];
+        if (!week || typeof week !== "object") return;
+        if (!("nextMon" in week)) return;
+        const oldData = week.nextMon;
+        const friHasData = hasAnyValue(week.fri);
+        const oldHasData = hasAnyValue(oldData);
+        if (oldHasData && !friHasData) {
+          // 旧 nextMon にデータあり / 新 fri は空 → 移行
+          week.fri = oldData;
+          moved++;
+        } else {
+          // それ以外 (両方空 or fri に既にデータあり) → 旧 nextMon は破棄
+          deleted++;
+        }
+        delete week.nextMon;
+        dirty = true;
+      });
+      if (dirty) localStorage.setItem(key, JSON.stringify(parsed));
+    } catch (e) {}
+  });
+
+  try { localStorage.setItem(MIGRATION_FLAG, new Date().toISOString()); } catch (e) {}
+  console.log("[water fri migration] moved=" + moved + ", deleted=" + deleted + ", scanned=" + scanned + " months");
+}
+try { migrateWaterFriKey(); } catch (e) { console.warn("water fri migration error:", e); }
 
 init();
 
