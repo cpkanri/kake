@@ -840,11 +840,13 @@ function getAllData(month) {
   var es=ss.getSheetByName('機器運転時間');
   if(es&&es.getLastRow()>1){var v=es.getRange(2,1,es.getLastRow()-1,9).getValues();
     for(var i=0;i<v.length;i++){if(matchMonth(v[i][0],month)){result.equipment.push({week:v[i][1],name:v[i][2],mon:v[i][3],tue:v[i][4],wed:v[i][5],thu:v[i][6],fri:v[i][7]});}}}
-  var els=ss.getSheetByName('電気設備');
+  // Phase 25-c-α 補追 3 (2026-05-27): Phase 39-B-1 で SS タブ rename 取り残し修正 (電気設備 → 日常電気設備)
+  var els=ss.getSheetByName('日常電気設備');
   if(els&&els.getLastRow()>1){var v=els.getRange(2,1,els.getLastRow()-1,34).getValues();
     for(var i=0;i<v.length;i++){if(matchMonth(v[i][0],month)){var r={week:v[i][1],day:v[i][2]};
       for(var f=0;f<ELEC_FIELDS.length;f++){var val=v[i][f+3];r[ELEC_FIELDS[f]]=(val===''||val===null)?null:val;} result.electrical.push(r);}}}
-  var ms=ss.getSheetByName('機械設備');
+  // Phase 25-c-α 補追 3 (2026-05-27): Phase 39-B-1 で SS タブ rename 取り残し修正 (機械設備 → 日常機械設備)
+  var ms=ss.getSheetByName('日常機械設備');
   if(ms&&ms.getLastRow()>1){var v=ms.getRange(2,1,ms.getLastRow()-1,5).getValues();
     for(var i=0;i<v.length;i++){if(matchMonth(v[i][0],month)){var md={};try{md=JSON.parse(v[i][3]);}catch(e){}
       result.mechanical.push({week:v[i][1],day:v[i][2],data:md});}}}

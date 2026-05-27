@@ -3381,15 +3381,34 @@ async function loadFromServer(month) {
 }
 
 // 機器運転時間: 日本語名→キー変換マップ
+// Phase 25-c-α 補追 3 (2026-05-27, memory #16): GAS Response の japName (SS セル値由来、
+//   "No." 半角 + "№" 全角 混在) ベースに刷新。旧 14 件は Phase 39-B-1 以前の旧 SS 名 (全て "№" 表記) +
+//   英語キーが現行 EQUIP_KEYS (~Hr サフィックス) と不整合だったため全置換。
+// GAS Response 22 件のうち、UI 側 EQUIP_KEYS に対応する 21 件をマップ。
+// (No.2余剰汚泥ポンプ は UI 構造に対応キー無し → 意図的に省略、merge 時 skip される)
+// 指示書「方針 A」採用、map に追加のみ ・skeleton 構造 (ensureWeeklyStructure) は不変。
 const EQUIP_NAME_TO_KEY = {
-  "スクリーンユニット": "screenUnit",
-  "№１主ポンプ": "mainPump1", "№２主ポンプ": "mainPump2",
-  "№１汚泥ポンプ": "sludgePump1", "№２汚泥ポンプ": "sludgePump2",
-  "№１エアレーション装置": "aeration1", "№２エアレーション装置": "aeration2", "№３エアレーション装置": "aeration3",
-  "終沈汚泥かき寄せ機": "finalScraper",
-  "№１返流水ポンプ": "returnPump1", "№２返流水ポンプ": "returnPump2",
-  "濃縮汚泥ポンプ": "thickPump", "濃縮汚泥かき寄せ機": "thickScraper",
-  "汚泥攪拌機": "sludgeMixer"
+  "No.1 主ポンプ": "mainPump1Hr",
+  "No.2 主ポンプ": "mainPump2Hr",
+  "No.1 終沈汚泥掻寄機": "finalScraperHr",
+  "No.1 床排水ポンプ": "drainPump1Hr",
+  "No.2 床排水ポンプ": "drainPump2Hr",
+  "No.1 濃縮汚泥ポンプ": "thickPump1Hr",
+  "No.2 濃縮汚泥ポンプ": "thickPump2Hr",
+  "No.1 曝気ブロワ": "aerationBlower1Hr",
+  "No.2曝気ブロワ": "aerationBlower2Hr",         // No.2 直後にスペース無 (GAS Response 通り)
+  "No.1 余剰汚泥ポンプ": "excessPumpHr",
+  "No.1 返流水ポンプ": "returnWaterPump1Hr",
+  "No.2 返流水ポンプ": "returnWaterPump2Hr",
+  "No.1-1エアレーション装置": "aeration11Hr",
+  "No.1-2エアレーション装置": "aeration12Hr",
+  "No.1-1返送汚泥ポンプ": "returnPump11Hr",
+  "No.1-2返送汚泥ポンプ": "returnPump12Hr",
+  "濃縮汚泥掻寄機": "thickScraperHr",
+  "濃縮汚泥曝気ブロワ": "thickAerationBlowerHr",
+  "濃縮汚泥攪拌機": "sludgeMixerHr",
+  "スクリーンユニット": "screenUnitHr",
+  "脱臭ファン": "deodorFanHr"
 };
 
 // 曜日: 日本語→コード変換マップ
