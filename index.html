@@ -3308,11 +3308,14 @@ async function saveSheetToServer(sheetType) {
   }
   let res;
   try {
+    // Phase 25-c-α 補追 1 (2026-05-27): 30s→90s 拡張
+    // 機器運転時間 GAS 53s 実行で client abort (false alarm) を防止
+    // 詳細: memory #28、kamitono Phase 25-b (d9f40e4) と同パターン
     res = await fetchWithTimeout(GAS_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain' },
       body: JSON.stringify(withTokenBody(payload))
-    }, 30000);
+    }, 90000);
   } catch (fetchErr) {
     throw new Error('通信失敗: ' + (fetchErr && fetchErr.message ? fetchErr.message : fetchErr));
   }
