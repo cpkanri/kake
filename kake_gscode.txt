@@ -798,7 +798,7 @@ function saveEquipmentData(data) {
 // ===== 電気設備 =====
 function saveElectricalData(data) {
   var month=data.month,el=data.electrical; if(!month||!el) return jsonResponse({error:'パラメータ不足'});
-  var ss=SpreadsheetApp.getActiveSpreadsheet(),sheet=ss.getSheetByName('電気設備');
+  var ss=SpreadsheetApp.getActiveSpreadsheet(),sheet=ss.getSheetByName('日常電気設備');
   if(!sheet) return jsonResponse({error:'シートなし'}); var now=new Date(),cnt=0;
   for(var wn in el){var wd=el[wn]; for(var dc in wd){var dd=wd[dc]; if(!dd)continue;
     var dn=DAY_NAMES[dc]; if(!dn)continue; var ri=findRow(sheet,month,parseInt(wn),dn);
@@ -810,7 +810,7 @@ function saveElectricalData(data) {
 // ===== 機械設備 =====
 function saveMechanicalData(data) {
   var month=data.month,mech=data.mechanical; if(!month||!mech) return jsonResponse({error:'パラメータ不足'});
-  var ss=SpreadsheetApp.getActiveSpreadsheet(),sheet=ss.getSheetByName('機械設備');
+  var ss=SpreadsheetApp.getActiveSpreadsheet(),sheet=ss.getSheetByName('日常機械設備');
   if(!sheet) return jsonResponse({error:'シートなし'}); var now=new Date(),cnt=0;
   for(var wn in mech){var wd=mech[wn]; for(var dc in wd){var dd=wd[dc]; if(!dd)continue;
     var dn=DAY_NAMES[dc]; if(!dn)continue; var ri=findRow(sheet,month,parseInt(wn),dn);
@@ -895,7 +895,7 @@ function exportExcel(month, templateId) {
 
     // ===== 電気設備 =====
     var elSheet=null; for(var s=0;s<sheets.length;s++){if(sheets[s].getName().indexOf('電気設備')>=0){elSheet=sheets[s];break;}}
-    if(elSheet){var elDs=ss2.getSheetByName('電気設備');
+    if(elSheet){var elDs=ss2.getSheetByName('日常電気設備');
       if(elDs&&elDs.getLastRow()>1){var elD=elDs.getRange(2,1,elDs.getLastRow()-1,34).getValues();
         var elM=elD.filter(function(r){return matchMonth(r[0],month);});
         for(var r=0;r<elM.length;r++){var row=elM[r],wn=row[1],dn=row[2],dc=DAY_REVERSE[dn];if(!dc)continue;
@@ -914,7 +914,7 @@ function exportExcel(month, templateId) {
         if(!mechSheet1) mechSheet1=sheets[s]; // 日常機械設備シート
       }
     }
-    if(mechSheet1){var mechDs=ss2.getSheetByName('機械設備');
+    if(mechSheet1){var mechDs=ss2.getSheetByName('日常機械設備');
       if(mechDs&&mechDs.getLastRow()>1){var mechD=mechDs.getRange(2,1,mechDs.getLastRow()-1,5).getValues();
         var mechM=mechD.filter(function(r){return matchMonth(r[0],month);});
         for(var r=0;r<mechM.length;r++){
