@@ -3395,10 +3395,67 @@ const EQUIP_NAME_TO_KEY = {
 // 曜日: 日本語→コード変換マップ
 const DAY_JP_TO_CODE = { "月": "mon", "火": "tue", "水": "wed", "木": "thu", "金": "fri" };
 
+// Phase 25-c-α 補追 2 (2026-05-27, memory #16): GAS Phase 39-B-1/B-2 後の配列フォーマット
+// → 旧ネストオブジェクト形式 ({week:{day:{...}}}) へ正規化するヘルパー
+// 背景: GAS getAllData は water/equipment/electrical/mechanical を配列で返すように変更
+// されたが、PWA mergeServerData は従来のネスト形式を期待。PWA 側で配列を吸収する。
+function _arrayToNested_waterLike(arr) {
+  // [{week, day, ...fields}, ...] → {week: {day: {...fields}}}
+  if (!Array.isArray(arr)) return arr;
+  const out = {};
+  arr.forEach(entry => {
+    if (!entry || typeof entry !== 'object') return;
+    const w = entry.week;
+    const d = entry.day;
+    if (w == null || d == null) return;
+    if (!out[w]) out[w] = {};
+    out[w][d] = entry;
+  });
+  return out;
+}
+function _arrayToNested_equipment(arr) {
+  // [{week, name, mon, tue, wed, thu, fri}, ...] → {week: {name: {mon, tue, wed, thu, fri}}}
+  if (!Array.isArray(arr)) return arr;
+  const out = {};
+  arr.forEach(entry => {
+    if (!entry || typeof entry !== 'object') return;
+    const w = entry.week;
+    const name = entry.name;
+    if (w == null || !name) return;
+    if (!out[w]) out[w] = {};
+    out[w][name] = { mon: entry.mon, tue: entry.tue, wed: entry.wed, thu: entry.thu, fri: entry.fri };
+  });
+  return out;
+}
+function _arrayToNested_mechanical(arr) {
+  // [{week, day, data:{...}}, ...] → {week: {day: {...data}}}
+  // GAS 側で v[i][3] を JSON.parse 済 object として返してくる
+  if (!Array.isArray(arr)) return arr;
+  const out = {};
+  arr.forEach(entry => {
+    if (!entry || typeof entry !== 'object') return;
+    const w = entry.week;
+    const d = entry.day;
+    if (w == null || d == null) return;
+    if (!out[w]) out[w] = {};
+    const data = (entry.data && typeof entry.data === 'object') ? entry.data : {};
+    out[w][d] = data;
+  });
+  return out;
+}
+
 // サーバーデータをマージ
 function mergeServerData(serverData, expectedMonth) {
   const summary = { water_days: 0, equipment_weeks: 0, electrical_days: 0, mechanical_days: 0, merged: false };
   if (!serverData) return summary;
+
+  // Phase 25-c-α 補追 2 (2026-05-27): GAS フラット配列フォーマットを旧ネスト形式へ正規化
+  // (Phase 39-B-1/B-2 で SS 構造をフラット化、GAS getAllData も配列返却に変更されたが
+  //  PWA 側 parse logic 未追従 = latent bug。Clear site data で表面化、memory #16 を参照)
+  if (Array.isArray(serverData.water)) serverData.water = _arrayToNested_waterLike(serverData.water);
+  if (Array.isArray(serverData.equipment)) serverData.equipment = _arrayToNested_equipment(serverData.equipment);
+  if (Array.isArray(serverData.electrical)) serverData.electrical = _arrayToNested_waterLike(serverData.electrical);
+  if (Array.isArray(serverData.mechanical)) serverData.mechanical = _arrayToNested_mechanical(serverData.mechanical);
 
   // Phase 14: 月キー流入防止 / Phase 19-E': 比較は両辺 YYYY-MM 正規化で寛容化
   // (1) 同期開始時の対象月と現在の対象月が違う(同期中にユーザーが月切替) → abort
