@@ -1233,3 +1233,69 @@ function cleanupOrphanWeeks_phase25c_zeta(dryRun) {
 
   return { scanned: scanned, deleted: deleted, kept: kept, dryRun: dryRun };
 }
+
+// ============================================================
+// Phase 25-d-①: 日常水質 reactivePower/demand 2列挿入移行 (one-shot)
+// 2026-05-28 追加。FIELD_MAP(29項目) と SS(27列) のズレを解消。
+// 実行後に再発が無ければ削除可能。
+// ============================================================
+function migrateWaterAddReactiveDemand_phase25d(dryRun) {
+  if (dryRun === undefined) dryRun = true; // safety default
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('日常水質');
+  if (!sheet) throw new Error('日常水質 sheet not found');
+
+  var startAt = new Date();
+  Logger.log('===== Phase 25-d water migration start: ' + startAt.toISOString() + ' =====');
+
+  var h6 = sheet.getRange(1, 6).getValue();
+  var h7 = sheet.getRange(1, 7).getValue();
+  var h8 = sheet.getRange(1, 8).getValue();
+  Logger.log('Current header: col6=' + h6 + ', col7=' + h7 + ', col8=' + h8);
+
+  // Guard 1: 既に移行済みか
+  if (h7 === 'reactivePower' && h8 === 'demand') {
+    Logger.log('ALREADY MIGRATED (col7=reactivePower, col8=demand). No action.');
+    return { status: 'already_migrated' };
+  }
+  // Guard 2: 想定どおりの旧レイアウトか (col6=power100v, col7=water)
+  if (h6 !== 'power100v' || h7 !== 'water') {
+    Logger.log('UNEXPECTED LAYOUT. Expected col6=power100v / col7=water. Got col6=' + h6 + ' / col7=' + h7 + '. ABORTING for safety.');
+    return { status: 'unexpected_layout', col6: h6, col7: h7 };
+  }
+
+  var lastRow = sheet.getLastRow();
+  var lastCol = sheet.getLastColumn();
+  Logger.log('Before: lastRow=' + lastRow + ', lastCol=' + lastCol);
+
+  if (dryRun) {
+    Logger.log('=== DRY RUN: no changes made ===');
+    Logger.log('Would: insertColumnsAfter(6, 2); set col7="reactivePower", col8="demand".');
+    Logger.log('Effect: water col7->col9, ..., updatedAt col32->col34 (FIELD_MAP 一致).');
+    Logger.log('===== end (dry run) =====');
+    return { status: 'dry_run', lastRow: lastRow, lastCol: lastCol };
+  }
+
+  // === REAL MIGRATION ===
+  sheet.insertColumnsAfter(6, 2);
+  sheet.getRange(1, 7).setValue('reactivePower');
+  sheet.getRange(1, 8).setValue('demand');
+  // 新規 2 列を文字列でなく数値運用にするため標準書式に (任意)
+  sheet.getRange(2, 7, Math.max(lastRow - 1, 1), 2).setNumberFormat('General');
+
+  SpreadsheetApp.flush();
+
+  var newLastCol = sheet.getLastColumn();
+  var v7 = sheet.getRange(1, 7).getValue();
+  var v8 = sheet.getRange(1, 8).getValue();
+  var v9 = sheet.getRange(1, 9).getValue();
+  Logger.log('After: lastCol=' + newLastCol + ', col7=' + v7 + ', col8=' + v8 + ', col9=' + v9);
+  if (v9 !== 'water') {
+    Logger.log('WARNING: col9 expected "water" but got "' + v9 + '". 手動で確認してください！');
+  }
+
+  var finishedAt = new Date();
+  Logger.log('===== Phase 25-d water migration end: ' + finishedAt.toISOString() + ' (status=migrated) =====');
+  return { status: 'migrated', newLastCol: newLastCol, col9: v9 };
+}
