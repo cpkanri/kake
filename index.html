@@ -418,6 +418,17 @@ header h1 {
   background: #fafbfc;
   box-sizing: border-box;
 }
+/* 機器/電気/機械テーブルの数値入力: スピナーを消して桁表示幅を確保 */
+.equip-table input[type="number"] {
+  -webkit-appearance: none;
+  -moz-appearance: textfield;
+  appearance: none;
+}
+.equip-table input[type="number"]::-webkit-outer-spin-button,
+.equip-table input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
 .equip-table input[type="number"]:focus,
 .equip-table input[type="text"]:focus {
   outline: none;
@@ -525,6 +536,7 @@ header h1 {
     /* 1列目140 + 5日×80 = 540px。viewport 390px より広いので横スクロール発火 */
     width: auto;
     min-width: 540px;
+    table-layout: auto;   /* ← 追加。fixed のままだと日列80pxが無視され引き伸ばされる */
     border-radius: 0;
     box-shadow: none;
     /* sticky 動作のため overflow:hidden を解除 */
@@ -551,9 +563,8 @@ header h1 {
   /* 2-6列目（月〜金）: 80px固定 */
   .equip-table thead th:not(:first-child),
   .equip-table tbody td:not(:first-child) {
-    width: 80px;
-    min-width: 80px;
-    max-width: 80px;
+    width: 88px;
+    min-width: 88px;
   }
   /* 1列目テキスト: 折り返し許可（省略しない） */
   .equip-table tbody td:first-child {
