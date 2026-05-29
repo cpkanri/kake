@@ -1299,3 +1299,7 @@ function migrateWaterAddReactiveDemand_phase25d(dryRun) {
   Logger.log('===== Phase 25-d water migration end: ' + finishedAt.toISOString() + ' (status=migrated) =====');
   return { status: 'migrated', newLastCol: newLastCol, col9: v9 };
 }
+
+function runRealMigration_phase25d() {
+  return migrateWaterAddReactiveDemand_phase25d(false);
+}
