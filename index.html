@@ -535,8 +535,8 @@ header h1 {
   .equip-table {
     /* 1列目140 + 5日×80 = 540px。viewport 390px より広いので横スクロール発火 */
     width: auto;
-    min-width: 540px;
-    table-layout: auto;   /* ← 追加。fixed のままだと日列80pxが無視され引き伸ばされる */
+    min-width: 700px;   /* 140 + 112×5。これによりコンテナより広い場合に横スクロールが正しく発火 */
+    table-layout: auto;   /* fixed のままだと日列指定が無視され引き伸ばされる */
     border-radius: 0;
     box-shadow: none;
     /* sticky 動作のため overflow:hidden を解除 */
@@ -563,8 +563,8 @@ header h1 {
   /* 2-6列目（月〜金）: 80px固定 */
   .equip-table thead th:not(:first-child),
   .equip-table tbody td:not(:first-child) {
-    width: 88px;
-    min-width: 88px;
+    width: 112px;
+    min-width: 112px;
   }
   /* 1列目テキスト: 折り返し許可（省略しない） */
   .equip-table tbody td:first-child {
@@ -588,8 +588,8 @@ header h1 {
   /* 入力ボックス: 高さを少し拡大 */
   .equip-table input[type="number"],
   .equip-table input[type="text"] {
-    height: 42px;
-    font-size: 16px;  /* iOS 自動ズーム抑制 */
+    height: 44px;
+    font-size: 17px;  /* iOS 自動ズーム抑制 + 6桁+小数の視認性 */
   }
 }
 
