@@ -418,17 +418,6 @@ header h1 {
   background: #fafbfc;
   box-sizing: border-box;
 }
-/* 機器/電気/機械テーブルの数値入力: スピナーを消して桁表示幅を確保 */
-.equip-table input[type="number"] {
-  -webkit-appearance: none;
-  -moz-appearance: textfield;
-  appearance: none;
-}
-.equip-table input[type="number"]::-webkit-outer-spin-button,
-.equip-table input[type="number"]::-webkit-inner-spin-button {
-  -webkit-appearance: none;
-  margin: 0;
-}
 .equip-table input[type="number"]:focus,
 .equip-table input[type="text"]:focus {
   outline: none;
@@ -1033,6 +1022,15 @@ header > .conn-status {
 .header-btn-label {
   font-size: 12px;
   white-space: nowrap;
+}
+/* type=number のスピナー (↑↓) を全て非表示にして type=text と表示を揃える */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
 }
 </style>
 </head>
