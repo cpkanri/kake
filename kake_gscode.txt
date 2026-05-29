@@ -1303,3 +1303,121 @@ function migrateWaterAddReactiveDemand_phase25d(dryRun) {
 function runRealMigration_phase25d() {
   return migrateWaterAddReactiveDemand_phase25d(false);
 }
+
+// ============================================================
+// Phase 25-d-②: 日常水質 cleanup (test行/phantom空行削除 + 月セル型統一)
+// 2026-05-29 追加。内容ベース判定 (行番号非依存)。実行後 再発無ければ削除可。
+// ============================================================
+function cleanupWaterSheet_phase25d2(dryRun) {
+  if (dryRun === undefined) dryRun = true; // safety default
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('日常水質');
+  if (!sheet) throw new Error('日常水質 sheet not found');
+
+  var startAt = new Date();
+  Logger.log('===== Phase 25-d-2 cleanup start: ' + startAt.toISOString() + ' (dryRun=' + dryRun + ') =====');
+
+  var lastRow = sheet.getLastRow();
+  var lastCol = sheet.getLastColumn();
+  if (lastRow < 2) { Logger.log('no data'); return { status: 'no_data' }; }
+
+  // ヘッダーから列 index を解決 (移行後 36 列前提だが動的に取得)
+  var header = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  function colOf(name) { for (var i = 0; i < header.length; i++) { if (header[i] === name) return i; } return -1; }
+  var idxMonth = 0;       // A列固定 (月)
+  var idxWeek = 1;        // B列固定 (週)
+  var idxDay = 2;         // C列固定 (曜日)
+  var idxInspector = colOf('inspector'); // 移行後 col29 想定だが動的
+  Logger.log('Resolved: inspector col index=' + (idxInspector + 1) + ' (1-based)');
+
+  var values = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+
+  var toDelete = [];   // 1-based row numbers
+  var toFixMonth = []; // {row, newVal}
+  var scanned = 0, keep = 0;
+
+  for (var i = 0; i < values.length; i++) {
+    var rowNum = i + 2;
+    var row = values[i];
+    var A = row[idxMonth], B = row[idxWeek], C = row[idxDay];
+
+    // --- B. phantom: A/B/C 全空 ---
+    var abcEmpty = (A === '' || A === null) && (B === '' || B === null) && (C === '' || C === null);
+    if (abcEmpty) { toDelete.push(rowNum); continue; }
+
+    scanned++;
+
+    // 月キー正規化
+    var mKey;
+    if (A instanceof Date) {
+      mKey = Utilities.formatDate(A, Session.getScriptTimeZone(), 'yyyy-MM');
+    } else {
+      mKey = String(A).substring(0, 7);
+    }
+
+    // --- A. test 行 ---
+    var inspVal = (idxInspector >= 0) ? row[idxInspector] : '';
+    var isTestInspector = (String(inspVal).toLowerCase() === 'test');
+    var isFutureMonth = (mKey >= '2026-06');
+    // 全データ列(E以降, updatedAt除く)が全て 1 のダミー判定
+    var allOnes = true; var dataCount = 0;
+    for (var c = 4; c < lastCol - 1; c++) { // col5(E)〜lastCol-1(updatedAt手前)
+      var v = row[c];
+      if (v !== '' && v !== null) { dataCount++; if (Number(v) !== 1) { allOnes = false; } }
+    }
+    var isAllOnes = (dataCount >= 20 && allOnes);
+
+    if (isTestInspector || isFutureMonth || isAllOnes) {
+      Logger.log('TEST row ' + rowNum + ': month=' + mKey + ', inspector=' + inspVal + ', allOnes=' + isAllOnes);
+      toDelete.push(rowNum);
+      continue;
+    }
+
+    // --- C. 月セル datetime 型 → str ---
+    if (A instanceof Date) {
+      toFixMonth.push({ row: rowNum, newVal: mKey });
+    }
+
+    keep++;
+  }
+
+  Logger.log('--- scan summary ---');
+  Logger.log('scanned(non-phantom): ' + scanned);
+  Logger.log('delete (phantom + test): ' + toDelete.length);
+  Logger.log('  phantom+test rows (first 10): ' + JSON.stringify(toDelete.slice(0, 10)));
+  Logger.log('month-type fix: ' + toFixMonth.length + ' rows ' + JSON.stringify(toFixMonth.map(function(x){return x.row;})));
+  Logger.log('keep: ' + keep);
+
+  if (dryRun) {
+    Logger.log('=== DRY RUN: no changes made ===');
+    Logger.log('===== Phase 25-d-2 cleanup end (dry run) =====');
+    return { status: 'dry_run', toDelete: toDelete.length, toFixMonth: toFixMonth.length, keep: keep };
+  }
+
+  // === REAL ===
+  // 1) 月セル型修正 (削除より先に、行番号がずれる前に実施)
+  for (var k = 0; k < toFixMonth.length; k++) {
+    var cell = sheet.getRange(toFixMonth[k].row, 1);
+    cell.setNumberFormat('@'); // 文字列書式
+    cell.setValue(toFixMonth[k].newVal);
+  }
+  Logger.log('month-type fixed: ' + toFixMonth.length);
+
+  // 2) 行削除 (下から上へ)
+  var rev = toDelete.slice().sort(function(a, b){ return b - a; });
+  for (var d = 0; d < rev.length; d++) {
+    sheet.deleteRow(rev[d]);
+    if ((d + 1) % 50 === 0) Logger.log('deleted ' + (d + 1) + '/' + rev.length);
+  }
+  SpreadsheetApp.flush();
+
+  var finishedAt = new Date();
+  Logger.log('After: lastRow=' + sheet.getLastRow());
+  Logger.log('===== Phase 25-d-2 cleanup end: ' + finishedAt.toISOString() + ' (status=done) =====');
+  return { status: 'done', deleted: toDelete.length, monthFixed: toFixMonth.length, newLastRow: sheet.getLastRow() };
+}
+
+function runRealCleanup_phase25d2() {
+  return cleanupWaterSheet_phase25d2(false);
+}
