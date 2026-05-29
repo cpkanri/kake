@@ -522,14 +522,13 @@ header h1 {
     padding: 8px 0;
   }
   .equip-table {
-    /* 1列目140 + 5日×80 = 540px。viewport 390px より広いので横スクロール発火 */
+    /* 1列目140 + 日列150×5 = 890px。親 .equip-wrap の overflow-x:auto で横スクロール */
     width: auto;
-    min-width: 700px;   /* 140 + 112×5。これによりコンテナより広い場合に横スクロールが正しく発火 */
-    table-layout: auto;   /* fixed のままだと日列指定が無視され引き伸ばされる */
+    min-width: 890px;
+    table-layout: fixed;   /* 列幅を指定どおり固定（auto の均等化を防ぎ、150px を厳守） */
     border-radius: 0;
     box-shadow: none;
-    /* sticky 動作のため overflow:hidden を解除 */
-    overflow: visible;
+    /* overflow:visible は親の overflow-x:auto を殺すため指定しない（sticky は overflow:auto 下でも機能） */
   }
   /* 1列目（項目名）を左固定 */
   .equip-table thead th:first-child,
@@ -552,8 +551,9 @@ header h1 {
   /* 2-6列目（月〜金）: 80px固定 */
   .equip-table thead th:not(:first-child),
   .equip-table tbody td:not(:first-child) {
-    width: 112px;
-    min-width: 112px;
+    width: 150px;
+    min-width: 150px;
+    max-width: 150px;
   }
   /* 1列目テキスト: 折り返し許可（省略しない） */
   .equip-table tbody td:first-child {
