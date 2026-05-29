@@ -407,11 +407,12 @@ header h1 {
 .equip-table input[type="number"],
 .equip-table input[type="text"] {
   width: 100%;
-  height: 38px;
-  padding: 4px 2px;
+  min-width: 64px;        /* 5〜6桁が切れないよう最小幅を確保 */
+  height: 40px;
+  padding: 4px 6px;        /* 左右余白をやや広げて端の桁が隠れないように */
   border: 1px solid #ccd;
   border-radius: 6px;
-  font-size: 15px;
+  font-size: 16px;         /* 15→16: 視認性 + iOS自動ズーム抑制 */
   text-align: right;
   font-family: inherit;
   background: #fafbfc;
@@ -508,13 +509,15 @@ header h1 {
 .toggle-btn[data-val="交互"] { background: #e8eaf6; color: #283593; border-color: #9fa8da; font-size: 12px; }
 .toggle-btn[data-val="No.1"] { background: #e3f2fd; color: #1565c0; border-color: #90caf9; font-size: 12px; }
 .toggle-btn[data-val="No.2"] { background: #fce4ec; color: #c62828; border-color: #ef9a9a; font-size: 12px; }
+.toggle-btn[data-val="No.1-1"] { background: #e3f2fd; color: #1565c0; border-color: #90caf9; font-size: 11px; white-space: nowrap; padding: 0 2px; }
+.toggle-btn[data-val="No.1-2"] { background: #fce4ec; color: #c62828; border-color: #ef9a9a; font-size: 11px; white-space: nowrap; padding: 0 2px; }
 .toggle-btn[data-val="連動"] { background: #e8f5e9; color: #2e7d32; border-color: #a5d6a7; font-size: 12px; }
 .toggle-btn[data-val="無"] { background: #e8f5e9; color: #2e7d32; border-color: #a5d6a7; }
 .toggle-btn[data-val="有"] { background: #ffcdd2; color: #c62828; border-color: #ef9a9a; }
 
 /* ===== モバイル: 機器/電気/機械タブの横スクロール ===== */
 /* 項目名を左固定 / 月〜金カラムを横スクロール / 入力欄を拡大 */
-@media (max-width: 768px) {
+@media (max-width: 1100px) {
   .equip-wrap {
     padding: 8px 0;
   }
