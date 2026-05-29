@@ -362,7 +362,7 @@ header h1 {
 }
 .equip-table {
   width: auto;
-  min-width: 645px;        /* 1列目120 + 日列105×5 = 645px。5列が画面内に収まるバランス */
+  min-width: 530px;        /* 1列目100 + 日列86×5 = 530px。5列を画面内に収める */
   table-layout: fixed;
   border-collapse: collapse;
   background: #fff;
@@ -384,20 +384,20 @@ header h1 {
 .equip-table thead th:first-child {
   text-align: left;
   padding-left: 10px;
-  width: 120px;
-  min-width: 120px;
+  width: 100px;
+  min-width: 100px;
   position: sticky;
   left: 0;
   background: #eef5f1;
   z-index: 6;
 }
 .equip-table thead th:not(:first-child) {
-  width: 105px;
-  min-width: 105px;
+  width: 86px;
+  min-width: 86px;
 }
 .equip-table tbody td:not(:first-child) {
-  width: 105px;
-  min-width: 105px;
+  width: 86px;
+  min-width: 86px;
 }
 .equip-table tbody td:first-child {
   position: sticky;
@@ -424,12 +424,12 @@ header h1 {
 .equip-table input[type="number"],
 .equip-table input[type="text"] {
   width: 100%;
-  min-width: 90px;         /* 105px列に収めつつ桁が切れない最小幅 */
+  min-width: 72px;         /* 86px列に収めつつ桁が切れない最小幅 */
   height: 40px;
-  padding: 4px 6px;        /* 左右余白をやや広げて端の桁が隠れないように */
+  padding: 4px 3px;        /* 左右余白を詰めて桁スペースを確保 */
   border: 1px solid #ccd;
   border-radius: 6px;
-  font-size: 15px;         /* 105px幅に8桁を収める */
+  font-size: 13px;         /* 86px幅に8桁を収める */
   text-align: right;
   font-family: inherit;
   background: #fafbfc;
@@ -539,10 +539,10 @@ header h1 {
     padding: 8px 0;
   }
   .equip-table {
-    /* 1列目120 + 日列105×5 = 645px。基本定義と統一（発火時も同じ見た目） */
+    /* 1列目100 + 日列86×5 = 530px。基本定義と統一（発火時も同じ見た目） */
     width: auto;
-    min-width: 645px;
-    table-layout: fixed;   /* 列幅を指定どおり固定（auto の均等化を防ぎ、105px を厳守） */
+    min-width: 530px;
+    table-layout: fixed;   /* 列幅を指定どおり固定（auto の均等化を防ぎ、86px を厳守） */
     border-radius: 0;
     box-shadow: none;
     /* overflow:visible は親の overflow-x:auto を殺すため指定しない（sticky は overflow:auto 下でも機能） */
@@ -552,9 +552,9 @@ header h1 {
   .equip-table tbody td:first-child {
     position: sticky;
     left: 0;
-    width: 120px;
-    min-width: 120px;
-    max-width: 120px;
+    width: 100px;
+    min-width: 100px;
+    max-width: 100px;
     background: #fff;
     z-index: 4;
     /* 右端に薄い影を出して「ここから右はスクロール領域」と示す */
@@ -565,12 +565,12 @@ header h1 {
     background: #eef5f1;
     z-index: 6;
   }
-  /* 2-6列目（月〜金）: 105px固定 */
+  /* 2-6列目（月〜金）: 86px固定 */
   .equip-table thead th:not(:first-child),
   .equip-table tbody td:not(:first-child) {
-    width: 105px;
-    min-width: 105px;
-    max-width: 105px;
+    width: 86px;
+    min-width: 86px;
+    max-width: 86px;
   }
   /* 1列目テキスト: 折り返し許可（省略しない） */
   .equip-table tbody td:first-child {
@@ -595,7 +595,7 @@ header h1 {
   .equip-table input[type="number"],
   .equip-table input[type="text"] {
     height: 40px;
-    font-size: 15px;  /* 基本定義と統一（105px幅に8桁） */
+    font-size: 13px;  /* 基本定義と統一（86px幅に8桁） */
   }
 }
 
