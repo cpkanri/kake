@@ -1421,3 +1421,53 @@ function cleanupWaterSheet_phase25d2(dryRun) {
 function runRealCleanup_phase25d2() {
   return cleanupWaterSheet_phase25d2(false);
 }
+
+// ============================================================================
+// Phase 25-d-③-a: 日常水質 備考(bikou)列の汚染クリーン (2026-05-29)
+// 終沈崩れの副次汚染で bikou に数値(PH値/100)・ISOタイムスタンプ・Date が混入。
+// bikou は本来テキスト備考のため、数値 / ISO文字列 / Date 型のセルのみ空にする。
+// テキストの正規備考は保持。ヘッダから列特定 = 行番号/列移動に非依存。
+// dryRun デフォルト true。本実行は runRealCleanupBikou_phase25d3a() を editor で ▶。
+// idempotent (再実行しても既に空なので無害)。
+// ============================================================================
+function cleanupBikou_phase25d3a(dryRun) {
+  if (dryRun === undefined) dryRun = true;
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('日常水質');
+  if (!sheet) throw new Error('日常水質 シートが見つかりません');
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return { status: 'skip', reason: 'データ行なし' };
+
+  // ヘッダ行(row1)から bikou 列を特定
+  var header = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var bikouCol = header.indexOf('bikou') + 1;
+  if (bikouCol < 1) throw new Error('ヘッダに bikou 列が見つかりません (header=' + JSON.stringify(header) + ')');
+
+  var isoRe = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
+  var rng = sheet.getRange(2, bikouCol, lastRow - 1, 1);
+  var vals = rng.getValues();
+  var cleared = [];
+  for (var i = 0; i < vals.length; i++) {
+    var v = vals[i][0];
+    if (v === '' || v === null) continue;
+    var isNum = (typeof v === 'number');
+    var isIso = (typeof v === 'string' && isoRe.test(v));
+    var isDate = (v instanceof Date);
+    if (isNum || isIso || isDate) {
+      cleared.push({ row: i + 2, before: String(v) });
+      vals[i][0] = '';
+    }
+  }
+  if (!dryRun && cleared.length > 0) {
+    rng.setValues(vals);            // 一括書込 (テキスト備考は同値で書き戻すだけ)
+    rng.setNumberFormat('@');       // 念のため文字列フォーマット固定
+  }
+  Logger.log('===== cleanupBikou_phase25d3a (dryRun=' + dryRun + ') =====');
+  Logger.log('bikou列 = ' + bikouCol + ' / クリア対象 ' + cleared.length + ' セル');
+  Logger.log(JSON.stringify(cleared, null, 2));
+  return { status: 'ok', dryRun: dryRun, bikouCol: bikouCol, clearedCount: cleared.length, cleared: cleared };
+}
+
+function runRealCleanupBikou_phase25d3a() {
+  return cleanupBikou_phase25d3a(false);
+}
