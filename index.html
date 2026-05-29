@@ -361,12 +361,12 @@ header h1 {
   -webkit-overflow-scrolling: touch;
 }
 .equip-table {
-  width: 100%;
+  width: auto;
+  min-width: 890px;        /* 1列目140 + 日列150×5。親 .equip-wrap(overflow-x:auto) で横スクロール */
   table-layout: fixed;
   border-collapse: collapse;
   background: #fff;
   border-radius: 10px;
-  overflow: hidden;
   box-shadow: 0 1px 3px rgba(0,0,0,0.05);
   font-size: 12px;
 }
@@ -384,10 +384,27 @@ header h1 {
 .equip-table thead th:first-child {
   text-align: left;
   padding-left: 10px;
-  width: 28%;
+  width: 140px;
+  min-width: 140px;
+  position: sticky;
+  left: 0;
+  background: #eef5f1;
+  z-index: 6;
 }
 .equip-table thead th:not(:first-child) {
-  width: 14.4%;
+  width: 150px;
+  min-width: 150px;
+}
+.equip-table tbody td:not(:first-child) {
+  width: 150px;
+  min-width: 150px;
+}
+.equip-table tbody td:first-child {
+  position: sticky;
+  left: 0;
+  background: #fff;
+  z-index: 4;
+  box-shadow: 2px 0 4px rgba(0,0,0,0.05);
 }
 .equip-table tbody td {
   padding: 4px;
@@ -407,12 +424,12 @@ header h1 {
 .equip-table input[type="number"],
 .equip-table input[type="text"] {
   width: 100%;
-  min-width: 64px;        /* 5〜6桁が切れないよう最小幅を確保 */
-  height: 40px;
+  min-width: 130px;        /* 6桁+小数が切れないよう最小幅を確保 */
+  height: 44px;
   padding: 4px 6px;        /* 左右余白をやや広げて端の桁が隠れないように */
   border: 1px solid #ccd;
   border-radius: 6px;
-  font-size: 16px;         /* 15→16: 視認性 + iOS自動ズーム抑制 */
+  font-size: 17px;         /* 視認性 + iOS自動ズーム抑制 */
   text-align: right;
   font-family: inherit;
   background: #fafbfc;
