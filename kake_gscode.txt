@@ -1471,3 +1471,103 @@ function cleanupBikou_phase25d3a(dryRun) {
 function runRealCleanupBikou_phase25d3a() {
   return cleanupBikou_phase25d3a(false);
 }
+
+// ============================================================================
+// Phase 39-B-3: 日常電気設備 フラット化 (2026-05-29)
+// テンプレ残骸 (Row 1-355) を除去し、フラット実データ (col A が日付の行) のみを
+// ヘッダ付きクリーンタブ「日常電気設備_新」へ移行する。
+// 注意: 汎用 migrateTab_Phase39B は col A=datetime を弾くため流用不可。専用実装。
+// col A は 'YYYY-MM' 文字列へ正規化 (Sheets の Date 自動変換罠を断つ + 月セル型統一)。
+// dryRun デフォルト true。idempotent (再実行で _新 を作り直す)。
+// ============================================================================
+function migrateElec_Phase39B3(dryRun) {
+  if (dryRun === undefined) dryRun = true;
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var src = ss.getSheetByName('日常電気設備');
+  if (!src) throw new Error('日常電気設備 が見つかりません');
+
+  var COLCOUNT = 3 + ELEC_FIELDS.length + 1; // 月週曜日(3) + 31 + updatedAt(1) = 35
+  var header = ['月', '週', '曜日'].concat(ELEC_FIELDS).concat(['updatedAt']);
+  if (header.length !== COLCOUNT) throw new Error('ヘッダ列数不一致: ' + header.length + ' != ' + COLCOUNT);
+
+  var lr = src.getLastRow();
+  var data = (lr >= 1) ? src.getRange(1, 1, lr, COLCOUNT).getValues() : [];
+
+  // col A が「月を表す」行のみ抽出: Date 型 or 'YYYY-MM' 文字列 の両対応
+  // (テンプレ残骸の col A は空 or ラベル文字列なので自然に除外される)
+  function monthKey(v) {
+    if (v instanceof Date) return Utilities.formatDate(v, 'JST', 'yyyy-MM');
+    if (typeof v === 'string' && /^\d{4}-\d{2}/.test(v.trim())) return v.trim().slice(0, 7);
+    return null;
+  }
+  var rows = [];
+  for (var i = 0; i < data.length; i++) {
+    var mk = monthKey(data[i][0]);
+    if (!mk) continue;
+    var row = data[i].slice(0, COLCOUNT);
+    row[0] = mk;                                   // 月: 'YYYY-MM' 文字列へ正規化
+    var wk = row[1];
+    row[1] = (typeof wk === 'number') ? Math.round(wk) : (parseInt(wk, 10) || wk); // 週: int 化
+    rows.push(row);
+  }
+
+  // ソート (月, 週, 曜日) — 曜日は文字列だが sortSheet と同じ並びに寄せる
+  var DOW = { '月': 1, '火': 2, '水': 3, '木': 4, '金': 5, '土': 6, '日': 7 };
+  rows.sort(function(a, b) {
+    if (a[0] !== b[0]) return a[0] < b[0] ? -1 : 1;
+    if (a[1] !== b[1]) return a[1] - b[1];
+    return (DOW[a[2]] || 99) - (DOW[b[2]] || 99);
+  });
+
+  var summary = { srcLastRow: lr, migrated: rows.length };
+  Logger.log('===== migrateElec_Phase39B3 (dryRun=' + dryRun + ') =====');
+  Logger.log('元 lastRow=' + lr + ' / 抽出フラット行=' + rows.length + ' (期待 49 前後)');
+  // 月別内訳
+  var byMonth = {};
+  rows.forEach(function(r) { byMonth[r[0]] = (byMonth[r[0]] || 0) + 1; });
+  Logger.log('月別: ' + JSON.stringify(byMonth));
+  Logger.log('先頭: ' + JSON.stringify(rows[0] ? rows[0].slice(0, 3) : null) +
+             ' / 末尾: ' + JSON.stringify(rows.length ? rows[rows.length - 1].slice(0, 3) : null));
+
+  if (dryRun) { summary.dryRun = true; return summary; }
+
+  // --- 本実行: _新 タブを作り直して書込 ---
+  var dstName = '日常電気設備_新';
+  var existingDst = ss.getSheetByName(dstName);
+  if (existingDst) ss.deleteSheet(existingDst);
+  var dst = ss.insertSheet(dstName);
+  dst.getRange(1, 1, 1, COLCOUNT).setValues([header]);
+  dst.setFrozenRows(1);
+  // A 列を文字列フォーマット固定 (Date 自動変換の再発防止)
+  dst.getRange(1, 1, dst.getMaxRows(), 1).setNumberFormat('@');
+  if (rows.length > 0) {
+    dst.getRange(2, 1, rows.length, COLCOUNT).setValues(rows);
+  }
+  summary.dryRun = false;
+  summary.dst = dstName;
+  Logger.log('→ ' + dstName + ' に ' + rows.length + ' 行書込完了 (要 swap)');
+  return summary;
+}
+
+function runRealMigrateElec_Phase39B3() {
+  return migrateElec_Phase39B3(false);
+}
+
+// 日常電気設備 の swap (既存 swapStep1_Phase39B と同型、電気専用)
+// 旧タブを 日常電気設備_旧_yyyymmdd へ退避し、_新 を正式名へ。
+function swapElec_Phase39B3() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var today = Utilities.formatDate(new Date(), 'JST', 'yyyyMMdd');
+  var orig = '日常電気設備', temp = '日常電気設備_新';
+  var origSheet = ss.getSheetByName(orig);
+  var tempSheet = ss.getSheetByName(temp);
+  if (!origSheet) return { status: 'skip', reason: 'orig not found' };
+  if (!tempSheet) return { status: 'skip', reason: 'temp not found (先に runRealMigrateElec_Phase39B3 を実行)' };
+  var bakName = orig + '_旧_' + today;
+  var counter = 1;
+  while (ss.getSheetByName(bakName)) { bakName = orig + '_旧_' + today + '_' + counter; counter++; }
+  origSheet.setName(bakName);
+  tempSheet.setName(orig);
+  Logger.log('===== swapElec_Phase39B3 完了: ' + bakName + ' / ' + temp + '→' + orig + ' =====');
+  return { status: 'OK', backup: bakName };
+}
