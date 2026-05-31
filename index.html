@@ -2086,6 +2086,52 @@ let weeklyData = {
   }
 })();
 
+// ===== 数値表示: フィールド基準精度での「末尾0埋め」（丸めなし・保存型は数値のまま） =====
+// 症状: 「20.0」入力→保存(Number化)/同期で「20」になり小数0が消える。
+// 方針(推奨A): 保存・同期・Excel・按分は従来通り数値。フォームへ値を注入する時だけ、
+// フィールド基準精度(step 由来)に合わせ末尾0を補って表示する（丸め・桁落ちなし）。
+// 基準桁の所在: 水質/機器運転時間/電気数値inputは DOM の step 属性、step を持たない
+// 電気dashSupport・機械の数値textは ELEC_SECTIONS/MECH_SECTIONS の field.step から導出。
+function decimalsFromStep(step) {
+  if (step == null || step === "") return null;
+  const s = String(step);
+  const i = s.indexOf(".");
+  return i < 0 ? 0 : (s.length - i - 1);
+}
+// step を持たない電気/機械フィールドの基準桁マップ（名前空間付き）
+var FIELD_DECIMALS = {};
+[["elec", ELEC_SECTIONS], ["mech", MECH_SECTIONS]].forEach(function (pair) {
+  pair[1].forEach(function (sec) {
+    sec.fields.forEach(function (f) {
+      if (f.step != null) FIELD_DECIMALS[pair[0] + ":" + f.key] = decimalsFromStep(f.step);
+    });
+  });
+});
+// 入力要素の基準小数桁を返す（step 優先、無ければ field マップ、無ければ null）
+function getInputDecimals(el) {
+  const step = el.getAttribute && el.getAttribute("step");
+  if (step != null && step !== "") return decimalsFromStep(step);
+  if (el.dataset && el.dataset.elec != null && FIELD_DECIMALS["elec:" + el.dataset.elec] != null) return FIELD_DECIMALS["elec:" + el.dataset.elec];
+  if (el.dataset && el.dataset.mech != null && FIELD_DECIMALS["mech:" + el.dataset.mech] != null) return FIELD_DECIMALS["mech:" + el.dataset.mech];
+  return null;
+}
+// 値を minDecimals まで末尾0埋めして文字列化（丸めない＝基準以上の実小数は全桁保持）。
+// 数値文字列以外（""・"-"・トグル値"○"等）はそのまま返す。
+function padDecimals(value, minDecimals) {
+  if (value === null || value === undefined || value === "") return "";
+  let s = (typeof value === "number") ? String(value) : String(value).trim();
+  if (!/^-?\d*\.?\d+$/.test(s)) return s; // 非数値はそのまま（"-"・記号・トグル等）
+  if (minDecimals == null) return s;       // 基準桁不明なら埋めない
+  const neg = s.charAt(0) === "-";
+  if (neg) s = s.slice(1);
+  const dot = s.indexOf(".");
+  let intp = dot < 0 ? s : s.slice(0, dot);
+  let frac = dot < 0 ? "" : s.slice(dot + 1);
+  if (frac.length < minDecimals) frac = frac + "0".repeat(minDecimals - frac.length); // 不足分だけ0埋め
+  const out = frac.length ? (intp + "." + frac) : intp;                                // 基準0かつ整数は小数点なし
+  return (neg ? "-" : "") + out;
+}
+
 let currentWeek = 1;
 let currentDay = "mon";
 let currentSheet = "water"; // "water", "equip", "elec", "mech"
@@ -2411,7 +2457,7 @@ function loadEquipDataToForm() {
     const key = el.dataset.equip;
     const day = el.dataset.eday;
     const v = week[key] ? week[key][day] : null;
-    el.value = (v === null || v === undefined) ? "" : v;
+    el.value = (v === null || v === undefined) ? "" : padDecimals(v, getInputDecimals(el));
   });
 }
 
@@ -2597,7 +2643,7 @@ function loadElecDataToForm() {
           el.value = "";
         }
       } else {
-        el.value = v;
+        el.value = padDecimals(v, getInputDecimals(el));
       }
     } else {
       // toggle button
@@ -2838,7 +2884,7 @@ function loadMechDataToForm() {
     const day = el.dataset.mday;
     const v = (week && week[day]) ? week[day][key] : null;
     if (el.tagName === "INPUT") {
-      el.value = (v === null || v === undefined) ? "" : v;
+      el.value = (v === null || v === undefined) ? "" : padDecimals(v, getInputDecimals(el));
     } else {
       const val = (v === null || v === undefined) ? "" : String(v);
       el.dataset.val = val;
@@ -2961,7 +3007,8 @@ function loadDataToForm() {
   document.querySelectorAll("[data-field]").forEach(el => {
     const key = el.dataset.field;
     const v = day[key];
-    el.value = (v === null || v === undefined) ? "" : v;
+    // 数値inputは基準精度で末尾0埋め表示（丸めなし）。非数値/トグル値は padDecimals がそのまま返す。
+    el.value = (v === null || v === undefined) ? "" : padDecimals(v, getInputDecimals(el));
   });
   // Phase 25-e: per-day inspector 自動補完(旧 kake_last_inspector 流用)は撤去。
   // 測定者は月単位欄(#monthInspector)へ一本化（syncMonthInspectorFromDays が反映、
