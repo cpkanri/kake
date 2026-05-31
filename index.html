@@ -5120,14 +5120,37 @@ function fillWaterSheet(ws, yyyy, mm, holidaySet) {
 
     // ===== Part②: 平均列(O=15, テンプレで O:R 結合済)に AVERAGE 数式を付与 =====
     // テンプレに平均数式が存在しない（O列データセルは空）ため code で設定。fullCalcOnLoad で開封時再計算。
-    // 範囲は各テーブルの当週 月〜金（指示書例 =AVERAGE(I4:M4) に準拠、積算は次週 N 列を含めない）:
-    //   積算テーブル(RUISAN_KEYS)=I:M(9-13) / 測定テーブル=J:N(10-14)。AVERAGE は空セルを無視。
+    // 項目①: 積算テーブルは I:N（=月〜金+次週初日 N 列を含める。Part① で N にデータが入る）。
+    //         測定テーブルは J:N（当週月〜金）のまま。AVERAGE は空セルを無視。
     // IFERROR(...,"") で全空の行/週は #DIV/0! を出さず空表示（テンプレ既存の空挙動を維持）。
     const AVG_COL = 15; // O列（O:R 結合のマスターセル）
     for (const key in ITEM_OFFSETS) {
       const row = dataRowBase + ITEM_OFFSETS[key];
-      const range = (RUISAN_KEYS.indexOf(key) >= 0) ? ('I' + row + ':M' + row) : ('J' + row + ':N' + row);
+      const range = (RUISAN_KEYS.indexOf(key) >= 0) ? ('I' + row + ':N' + row) : ('J' + row + ':N' + row);
       ws.getCell(row, AVG_COL).value = { formula: 'IFERROR(AVERAGE(' + range + '),"")' };
+    }
+    // 項目②: 塩素投入量(R37, 測定テーブル所属 J:N) にも平均を付与（ITEM_OFFSETS 対象外のため個別）。
+    {
+      const r37 = 37 + offset;
+      ws.getCell(r37, AVG_COL).value = { formula: 'IFERROR(AVERAGE(J' + r37 + ':N' + r37 + '),"")' };
+    }
+
+    // ===== 項目③: 臭気「有無」セル(G24:H26 結合, マスター G24)を消す（腐敗臭ラベル C24:F26 は残す） =====
+    ws.getCell(24 + offset, 7).value = null;
+
+    // ===== 項目④: 外観(R19-21)・臭気(R24-26) に固定値を全データ列(J〜N=10-14)へ書込 =====
+    // 列は測定テーブル基準 J〜N（I 列は 流入/ディッチ/放流 のサブラベルなので書かない）。毎日同運用＝全列一律。
+    // 外観: 流入(R19)=黄色 / ディッチ(R20)=茶色 / 放流(R21)=透明
+    // 臭気: 流入(R24)=下水臭 / ディッチ(R25)=活性汚泥臭 / 放流(R26)=無
+    // ※ 水質管理報告シートの 流入/ディッチ/放流水 はこれらを INDEX/MATCH で参照する数式駆動のため、
+    //    本書込により自動反映される（報告シートには直接書かない）。
+    const FIXED_TEXT = { 19: '黄色', 20: '茶色', 21: '透明', 24: '下水臭', 25: '活性汚泥臭', 26: '無' };
+    const FIXED_COLS = [10, 11, 12, 13, 14]; // J〜N
+    for (const baseRow in FIXED_TEXT) {
+      const r = Number(baseRow) + offset;
+      for (let ci = 0; ci < FIXED_COLS.length; ci++) {
+        setCell(ws, r, FIXED_COLS[ci], FIXED_TEXT[baseRow]);
+      }
     }
   }
 }
@@ -5161,6 +5184,17 @@ function fillReportFinalData(wb, yyyy, mm) {
         setCell(ws, r, FINAL_COLS[key], dayData[key]);
       }
     }
+  }
+
+  // ===== 項目⑤: 外観・臭気「終沈」列の固定値（派生数式・Yamane 選択） =====
+  // 報告シートの 外観/臭気 は page2(R49-79)。流入/ディッチ/放流水(C/D/F・G/H/J)は
+  // 日常水質 J19:N21/J24:N26 を INDEX/MATCH 参照する数式駆動で、項目④の固定値書込により自動反映。
+  // 「終沈」列(外観=E列5 / 臭気=I列9)は日常水質側に元データが無く数式も無い空列のため、
+  // 流入セルが非空(=点検日)のときだけ固定値を返す派生数式を付与（点検日のみ表示・他列と整合）。
+  // ※ page1(R8-38)の E/I は 終沈水温/PH(fillReportFinalData が直書き)なので触らない。R49-79 限定。
+  for (let r = 49; r <= 79; r++) {
+    ws.getCell(r, 5).value = { formula: 'IF(C' + r + '="","","透明")' }; // 外観 終沈
+    ws.getCell(r, 9).value = { formula: 'IF(G' + r + '="","","無")' };   // 臭気 終沈
   }
 }
 
