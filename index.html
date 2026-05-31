@@ -5147,6 +5147,11 @@ function fillWaterSheet(ws, yyyy, mm, holidaySet) {
       try { ws.unMergeCells('C' + orB + ':F' + orE); } catch (e) {}
       try { ws.unMergeCells('G' + orB + ':H' + orE); } catch (e) {}
       ws.mergeCells('C' + orB + ':H' + orE);
+      // 腐敗臭マスター C{24} を上下左右中央＋折返しに（隣の外観 油膜・色合 C19 と同一: center/center/wrapText）
+      const odorMaster = ws.getCell(orB, 3); // C列=3
+      odorMaster.alignment = Object.assign({}, odorMaster.alignment, {
+        horizontal: 'center', vertical: 'center', wrapText: true
+      });
     } catch (e) { console.error('腐敗臭 merge:', e); }
 
     // ===== 項目②(方針転換): 外観(R19-21)・臭気(R24-26) の固定値を「実測のある日の列のみ」へ書込 =====
