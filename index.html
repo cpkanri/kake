@@ -4837,6 +4837,8 @@ async function exportExcel() {
       p1Cell.value = null;
       p1Cell.value = toExcelDate(new Date(yyyy, mm - 1, 1));
       p1Cell.numFmt = 'yyyy"年"m"月"';
+      // 項目①: P1 は列幅不足で ## 表示になり印刷で目立つため白文字に（値/numFmt は月報連動のため維持）
+      p1Cell.font = Object.assign({}, p1Cell.font, { color: { argb: 'FFFFFFFF' } });
       fillWaterSheet(wsWater, yyyy, mm, holidaySet);
     }
   } catch (e) { console.error("fillWaterSheet:", e); }
@@ -5135,22 +5137,39 @@ function fillWaterSheet(ws, yyyy, mm, holidaySet) {
       ws.getCell(r37, AVG_COL).value = { formula: 'IFERROR(AVERAGE(J' + r37 + ':N' + r37 + '),"")' };
     }
 
-    // ===== 項目③: 臭気「有無」セル(G24:H26 結合, マスター G24)を消す（腐敗臭ラベル C24:F26 は残す） =====
+    // ===== 臭気「有無」セル(G24:H26 結合, マスター G24)を消す（腐敗臭ラベルは残す） =====
     ws.getCell(24 + offset, 7).value = null;
 
-    // ===== 項目④: 外観(R19-21)・臭気(R24-26) に固定値を全データ列(J〜N=10-14)へ書込 =====
-    // 列は測定テーブル基準 J〜N（I 列は 流入/ディッチ/放流 のサブラベルなので書かない）。毎日同運用＝全列一律。
+    // ===== 項目③: 腐敗臭セルを外観(C:H)と同じ幅へ結合（C{24}:F{26} と 有無 G{24}:H{26} を統合し C{24}:H{26}） =====
+    // 既存結合を unmerge してから新範囲で merge（ExcelJS は重複結合エラーになるため）。腐敗臭文字はマスター C{24} に残る。
+    try {
+      const orB = 24 + offset, orE = 26 + offset; // 臭気ブロック行
+      try { ws.unMergeCells('C' + orB + ':F' + orE); } catch (e) {}
+      try { ws.unMergeCells('G' + orB + ':H' + orE); } catch (e) {}
+      ws.mergeCells('C' + orB + ':H' + orE);
+    } catch (e) { console.error('腐敗臭 merge:', e); }
+
+    // ===== 項目②(方針転換): 外観(R19-21)・臭気(R24-26) の固定値を「実測のある日の列のみ」へ書込 =====
+    // 列は測定テーブル基準 J〜N（I 列は 流入/ディッチ/放流 のサブラベルなので書かない）。
+    // 前回の「全列一律」を撤回し、dayHasMeasurement(その日の実測=inspector/bikou以外が非空)が真の列だけに限定。
+    // → 祝日/未実施日(4/29 等)の列には固定値を入れず、日付ヘッダのみ残す（水質管理報告の数式参照も連動して空に）。
     // 外観: 流入(R19)=黄色 / ディッチ(R20)=茶色 / 放流(R21)=透明
     // 臭気: 流入(R24)=下水臭 / ディッチ(R25)=活性汚泥臭 / 放流(R26)=無
-    // ※ 水質管理報告シートの 流入/ディッチ/放流水 はこれらを INDEX/MATCH で参照する数式駆動のため、
-    //    本書込により自動反映される（報告シートには直接書かない）。
     const FIXED_TEXT = { 19: '黄色', 20: '茶色', 21: '透明', 24: '下水臭', 25: '活性汚泥臭', 26: '無' };
-    const FIXED_COLS = [10, 11, 12, 13, 14]; // J〜N
     for (const baseRow in FIXED_TEXT) {
       const r = Number(baseRow) + offset;
-      for (let ci = 0; ci < FIXED_COLS.length; ci++) {
-        setCell(ws, r, FIXED_COLS[ci], FIXED_TEXT[baseRow]);
+      for (const dk in DAY_COL_MEASURE) {
+        const dayObj = weeklyData.weeks[w] && weeklyData.weeks[w][APP_KEY_MAP[dk]];
+        if (dayHasMeasurement(dayObj)) {
+          setCell(ws, r, DAY_COL_MEASURE[dk], FIXED_TEXT[baseRow]);
+        }
       }
+    }
+
+    // ===== 項目④: 外観(R19-21)・臭気(R24-26) の平均列 O(=15, O:R結合マスター)に「-」（文字データで平均不能） =====
+    const DASH_ROWS = [19, 20, 21, 24, 25, 26];
+    for (let di = 0; di < DASH_ROWS.length; di++) {
+      ws.getCell(DASH_ROWS[di] + offset, AVG_COL).value = "-"; // U+002D
     }
   }
 }
