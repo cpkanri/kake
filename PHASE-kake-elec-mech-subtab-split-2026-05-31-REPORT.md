@@ -87,8 +87,8 @@ index.html から `ELEC_SECTIONS`/`MECH_SECTIONS`/`OFFSETS`/`MAP1`/`MAP2` を抽
 - CSS は常時効かせる指定を基本定義へ。月単位欄（点検者）は現行のまま（フォーム外・専用処理）。ExcelJS 出力ロジック未編集。
 
 ## 5. 最終 HEAD
-- 実装コミット: **{{HASH}}**。`index.html`（サブタブUI追加・page付与IIFE・build フィルタ・切替イベント・CSS）+ `sw.js`（v44）。
-- 本報告のハッシュ追記は後続コミットで push。
+- 実装コミット: **`07aa5e8acd7d2211248f747b383b4934133ca6d5`**（短縮 `07aa5e8`）。`index.html`（サブタブUI追加・page付与IIFE・build フィルタ・切替イベント・CSS）+ `sw.js`（v43→v44）。
+- 本報告のハッシュ追記は後続コミットで push（repo 先頭はその追記コミット）。
 
 ## 6. 次フェーズ
 - Yamane 実機確認（Clear site data → ハードリロード sw v44 → 電気・機械フォームのサブタブ表示・縦長解消・各週入力・保存・出力一致を目視）。
