@@ -4744,6 +4744,21 @@ function writeMechEmptyCell(ws, row, col, fieldKey, val, date) {
   if (emptyVal === "-") cell.numFmt = "@";
 }
 
+// Part2: 電気設備の空セル用。機械と同基準（非祝日の空欄→「-」(U+002D)/祝日→空欄、numFmt="@"）。
+// 電気には機械の常用機選択(*Select)のような対象外キーが無いため、点検グリッド全セルを対象とする
+// （実測の有無に依らず、対象月の非祝日 平日列＝機械の writeMechEmptyCell と同一の日基準）。
+function writeElecEmptyCell(ws, row, col, date) {
+  if (date) {
+    try {
+      var hs = getHolidaySetFromCache();
+      if (hs && hs.has(dateToStr(date))) { ws.getCell(row, col).value = null; return; }
+    } catch (e) { /* キャッシュ失敗時は「-」出力にフォールバック */ }
+  }
+  var cell = ws.getCell(row, col);
+  cell.value = "-";
+  cell.numFmt = "@";
+}
+
 function setCell(ws, row, col, val) {
   if (val === null || val === undefined || val === "") return;
   const cell = ws.getCell(row, col);
@@ -5247,8 +5262,25 @@ function fillWaterSheet(ws, yyyy, mm, holidaySet) {
     const AVG_COL = 15; // O列（O:R 結合のマスターセル）
     for (const key in ITEM_OFFSETS) {
       const row = dataRowBase + ITEM_OFFSETS[key];
-      const range = (RUISAN_KEYS.indexOf(key) >= 0) ? ('I' + row + ':N' + row) : ('J' + row + ':N' + row);
-      ws.getCell(row, AVG_COL).value = { formula: 'IFERROR(AVERAGE(' + range + '),"")' };
+      if (RUISAN_KEYS.indexOf(key) >= 0) {
+        // Part1: 積算値・流量行は「平均日量」= (最後の読み − 最初の読み) / (最後の日付 − 最初の日付の暦日数)。
+        // 値域 I:N(col9-14, row)、日付域 I:N(col9-14, dateRow)。範囲内の実在する最初/最後の読み値と
+        // 対応日付を LOOKUP/INDEX-MATCH で取得（I・N が空でも内側の実測点で按分）。読み値1点以下は空欄。
+        // 運転管理月報 K/M(fillProratedFlowDiff) と同じ「累積差÷日数」。四捨五入しない・fullCalcOnLoad で再計算。
+        const vr = 'I' + row + ':N' + row;
+        const dr = 'I' + dateRow + ':N' + dateRow;
+        const firstPos = 'MATCH(TRUE,INDEX((' + vr + '<>""),0),0)';
+        const lastVal = 'LOOKUP(2,1/(' + vr + '<>""),' + vr + ')';
+        const firstVal = 'INDEX(' + vr + ',' + firstPos + ')';
+        const lastDate = 'LOOKUP(2,1/(' + vr + '<>""),' + dr + ')';
+        const firstDate = 'INDEX(' + dr + ',' + firstPos + ')';
+        ws.getCell(row, AVG_COL).value = {
+          formula: 'IFERROR((' + lastVal + '-' + firstVal + ')/(' + lastDate + '-' + firstDate + '),"")'
+        };
+      } else {
+        // 測定値（水温/PH/透視度/SV/MLSS 等）の平均は従来どおり AVERAGE（J:N）。
+        ws.getCell(row, AVG_COL).value = { formula: 'IFERROR(AVERAGE(J' + row + ':N' + row + '),"")' };
+      }
     }
     // 項目②: 塩素投入量(R37, 測定テーブル所属 J:N) にも平均を付与（ITEM_OFFSETS 対象外のため個別）。
     {
@@ -5698,34 +5730,27 @@ function fillElecSheet(ws, yyyy, mm) {
       const day = wData[dk];
       if (!day) continue;
       let hasElecData = false;
+      // Part2: 点検グリッド各セルは 値あり→値 / 空欄→「-」(非祝日)・空欄(祝日)（機械と同基準）
       for (const key in OFFSETS) {
         const v = day[key];
-        if (v !== null && v !== undefined && v !== "") hasElecData = true;
-        setCell(ws, base + OFFSETS[key], col, v);
+        if (v !== null && v !== undefined && v !== "") {
+          hasElecData = true;
+          setCell(ws, base + OFFSETS[key], col, v);
+        } else {
+          writeElecEmptyCell(ws, base + OFFSETS[key], col, actual);
+        }
+      }
+      // 積算読み(返送=44/余剰=48/放流=52): 日常水質 returnSludge/excessSludge/discharge を単一源に
+      // （運転管理月報 J/L/N と同一源泉）。値あれば値、無ければ Part2 ルール（実測日=「-」/祝日=空欄）。
+      const wDay = weeklyData.weeks[w] && weeklyData.weeks[w][dk];
+      const TOTAL_SRC = { 44: "returnSludge", 48: "excessSludge", 52: "discharge" };
+      for (const off in TOTAL_SRC) {
+        const wv = wDay ? wDay[TOTAL_SRC[off]] : null;
+        if (wv !== null && wv !== undefined && wv !== "") setCell(ws, base + Number(off), col, wv);
+        else writeElecEmptyCell(ws, base + Number(off), col, actual);
       }
       // 項目③: 点検者氏名(base+33=R36系) に月単位測定者を書く（電気データのある実測日のみ）
       if (inspName && hasElecData) setCell(ws, base + 33, col, inspName);
-    }
-  }
-
-  // ===== 積算読み(返送/余剰/放流) を日常水質の累積値から単一源で書込（電気の二重入力廃止） =====
-  // 源泉 = 運転管理月報 J/L/N と同一（日常水質 returnSludge/excessSludge/discharge）。
-  // 各週・各実測日列。日常水質が無データ/未入力の日は setCell が空値スキップ → 空欄維持。
-  // 電気データの有無に依存せず、水質データのある日に書く（単一の真実源）。
-  const TOTAL_SRC = { 44: "returnSludge", 48: "excessSludge", 52: "discharge" };
-  for (let w = 1; w <= 5; w++) {
-    const base = WEEK_START[w];
-    const wWater = weeklyData.weeks[w];
-    if (!wWater) continue;
-    for (const dk in DAY_COL) {
-      const actual = getActualDate(w, dk);
-      if (!actual || actual.getFullYear() !== yyyy || (actual.getMonth() + 1) !== mm) continue;
-      const wDay = wWater[dk];
-      if (!wDay) continue;
-      const col = DAY_COL[dk];
-      for (const off in TOTAL_SRC) {
-        setCell(ws, base + Number(off), col, wDay[TOTAL_SRC[off]]);
-      }
     }
   }
 }
