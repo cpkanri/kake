@@ -4898,9 +4898,12 @@ async function exportExcel() {
   // Phase 13c: 運転管理月報の月初(R6)行に1日データと差分を書込
   try { fillKakeOperationReportSheet(wb, yyyy, mm); } catch (e) { console.error("fillKakeOperationReportSheet:", e); }
 
-  // 無データ日「0 表示」→ 空欄化: 水質管理報告の INDEX/MATCH 数式を IF(ISBLANK(INDEX),"",INDEX) で包む
+  // 無データ日「0 表示」→ 空欄化: 水質管理報告・運転管理月報の INDEX/MATCH 数式を IF(ISBLANK(INDEX),"",INDEX) で包む
   // （他 PWA 書込が全て終わった後に実行。終沈派生式 IF(C="",..) は C が "" を返すことで連鎖空欄化）
   try { fixReportBlankZeros(wb); } catch (e) { console.error("fixReportBlankZeros:", e); }
+
+  // 運転管理月報 K/M: 返送汚泥(J)/余剰汚泥(L)読み値の按分差分を全ギャップ日に値書込（クロス月按分）
+  try { fillProratedFlowDiff(wb, yyyy, mm); } catch (e) { console.error("fillProratedFlowDiff:", e); }
 
   let out = await wb.xlsx.writeBuffer();
   out = await sanitizeXlsxBuffer(out);
@@ -5245,11 +5248,22 @@ function fillReportFinalData(wb, yyyy, mm) {
 //   - MATCH 失敗（土日）           → INDEX エラー → 既存 IFERROR 5週ネストが次週/最終 "" へフォールバック（土日空欄維持）
 // 外観/臭気の終沈派生式 IF(C="","","透明") / IF(G="","","無") は、C/G が "" を返すことで連鎖的に空欄化する。
 // 集計行（39 MAX / 40 AVERAGE / 41 MIN）は日次セルが "" を返せば数値以外を無視するため自動で正常化する。
+//
+// 運転管理月報シートも同方式で処理する（INDEX 列 = C/D/E/F/J/L 行7-36）。ただし K(11)/M(13) 列は
+// fillProratedFlowDiff が按分差分を「値」で書込むため除外する。集計行は 37 MAX/38 AVERAGE/39 MIN/40 SUM。
 function fixReportBlankZeros(wb) {
-  const ws = wb.getWorksheet("水質管理報告");
-  if (!ws) return;
+  const wsWater = wb.getWorksheet("水質管理報告");
+  if (wsWater) wrapIndexBlankInSheet(wsWater, null);
+  const wsMonthly = wb.getWorksheet("運転管理月報");
+  if (wsMonthly) wrapIndexBlankInSheet(wsMonthly, { 11: true, 13: true }); // K/M 除外
+}
+
+// シート内の全数式セルを走査し、INDEX(...) を含むものを IF(ISBLANK(INDEX),"",INDEX) 化する。
+// skipCols（列番号→true のマップ）に該当する列はスキップ。
+function wrapIndexBlankInSheet(ws, skipCols) {
   ws.eachRow({ includeEmpty: false }, function (row) {
-    row.eachCell({ includeEmpty: false }, function (cell) {
+    row.eachCell({ includeEmpty: false }, function (cell, colNumber) {
+      if (skipCols && skipCols[colNumber]) return;
       const v = cell.value;
       if (v && typeof v === "object" && typeof v.formula === "string" && v.formula.indexOf("INDEX(") >= 0) {
         const nf = guardIndexBlank(v.formula);
@@ -5295,6 +5309,113 @@ function guardIndexBlank(formula) {
   return out;
 }
 
+// ===== 運転管理月報 K/M: 返送汚泥(J)・余剰汚泥(L)読み値の「按分差分」を値で書込 =====
+// K = J(返送汚泥読み値=returnSludge 累積)の日差分、M = L(余剰汚泥読み値=excessSludge 累積)の日差分。
+// 連続する実測日 a(Va)・b(Vb) について daily=(Vb−Va)/(暦日差 b−a) を、a+1〜b の各暦日のうち
+// 当月に属する日の K/M セルへ「値」で書込（丸めず、土日・祝日・未点検日もギャップ内なら値が入る）。
+// クロス月按分: 最初のギャップは前月末の最後の実測読み値を起点、最後のギャップは翌月最初の実測読み値を終点とする。
+// 前月/翌月データが無ければ当該ギャップは空欄（書込まない）。テンプレ常駐の K/M LOOKUP 数式は null で消してから値書込。
+// 集計（37 MAX/38 AVERAGE/39 MIN/40 SUM）は値が入ることで自動正常化（合計K=当月総差分に一致）。
+function fillProratedFlowDiff(wb, yyyy, mm) {
+  const ws = wb.getWorksheet("運転管理月報");
+  if (!ws) return;
+  const daysInMonth = new Date(yyyy, mm, 0).getDate();
+  const prevStr = mm === 1 ? (yyyy - 1) + "-12" : yyyy + "-" + String(mm - 1).padStart(2, "0");
+  const nextStr = mm === 12 ? (yyyy + 1) + "-01" : yyyy + "-" + String(mm + 1).padStart(2, "0");
+  const SPECS = [
+    { key: "returnSludge", col: 11 }, // K
+    { key: "excessSludge", col: 13 }, // M
+  ];
+  for (const spec of SPECS) {
+    // 当月の実測点（ライブ data model から）昇順
+    const points = collectCurrentMonthFlowPoints(spec.key, yyyy, mm);
+    // 前月末の最後の実測 → 先頭アンカー
+    const prevPts = collectStoredMonthFlowPoints(prevStr, spec.key);
+    if (prevPts.length) points.unshift(prevPts[prevPts.length - 1]);
+    // 翌月最初の実測 → 末尾アンカー
+    const nextPts = collectStoredMonthFlowPoints(nextStr, spec.key);
+    if (nextPts.length) points.push(nextPts[0]);
+
+    // 当月の K/M 日次セル(R6〜R{5+末日})を一旦 null（テンプレ LOOKUP 数式を除去）
+    for (let d = 1; d <= daysInMonth; d++) ws.getCell(5 + d, spec.col).value = null;
+
+    // 連続実測ペアごとに按分し、当月該当日へ値書込
+    for (let i = 0; i < points.length - 1; i++) {
+      const A = points[i], B = points[i + 1];
+      const dayDiff = Math.round((B.date - A.date) / 86400000);
+      if (dayDiff <= 0) continue;
+      const daily = (B.value - A.value) / dayDiff; // 丸めない
+      for (let k = 1; k <= dayDiff; k++) {
+        const d = new Date(A.date.getFullYear(), A.date.getMonth(), A.date.getDate() + k);
+        if (d.getFullYear() === yyyy && (d.getMonth() + 1) === mm) {
+          ws.getCell(5 + d.getDate(), spec.col).value = daily; // numFmt はテンプレ既存スタイルを踏襲
+        }
+      }
+    }
+  }
+}
+
+// 数値変換ヘルパー: null/""/"-" は無データとして null を返す。
+function flowNumOrNull(v) {
+  if (v == null || v === "" || v === "-") return null;
+  const n = Number(v);
+  return isNaN(n) ? null : n;
+}
+
+// 当月のライブ weeklyData から、指定キーの実測 (date, value) 点を昇順で収集。
+function collectCurrentMonthFlowPoints(key, yyyy, mm) {
+  const dayKeys = ["mon", "tue", "wed", "thu", "fri"];
+  const pts = [];
+  for (let w = 1; w <= 5; w++) {
+    for (const dk of dayKeys) {
+      const actual = getActualDate(w, dk);
+      if (!actual) continue;
+      if (actual.getFullYear() !== yyyy || (actual.getMonth() + 1) !== mm) continue;
+      const day = weeklyData.weeks[w] && weeklyData.weeks[w][dk];
+      if (!day) continue;
+      const val = flowNumOrNull(day[key]);
+      if (val == null) continue;
+      pts.push({ date: new Date(actual.getFullYear(), actual.getMonth(), actual.getDate()), value: val });
+    }
+  }
+  pts.sort(function (a, b) { return a.date - b.date; });
+  return pts;
+}
+
+// localStorage の kake_weekly_<monthStr> から、指定キーの実測 (date, value) 点を昇順で収集。
+// 当該月に属する日付のみ（前後月の溢れ日は除外）。前月/翌月アンカー取得に使用。
+function collectStoredMonthFlowPoints(monthStr, key) {
+  let raw = null;
+  try { raw = localStorage.getItem("kake_weekly_" + monthStr); } catch (e) { return []; }
+  if (!raw) return [];
+  let wk;
+  try { wk = JSON.parse(raw); } catch (e) { return []; }
+  if (!wk || !wk.weeks || !wk.startDate) return [];
+  const base = new Date(wk.startDate + "T00:00:00");
+  if (isNaN(base.getTime())) return [];
+  const parts = monthStr.split("-");
+  const my = parseInt(parts[0], 10), mm2 = parseInt(parts[1], 10);
+  const dayOffsetMap = { mon: 0, tue: 1, wed: 2, thu: 3, fri: 4 };
+  const pts = [];
+  for (let w = 1; w <= 5; w++) {
+    const wd = wk.weeks[w];
+    if (!wd) continue;
+    ["mon", "tue", "wed", "thu", "fri"].forEach(function (dk) {
+      const dd = wd[dk];
+      if (!dd) return;
+      const val = flowNumOrNull(dd[key]);
+      if (val == null) return;
+      const off = (w - 1) * 7 + dayOffsetMap[dk];
+      const d = new Date(base.getFullYear(), base.getMonth(), base.getDate() + off);
+      if (d.getFullYear() === my && (d.getMonth() + 1) === mm2) {
+        pts.push({ date: new Date(d.getFullYear(), d.getMonth(), d.getDate()), value: val });
+      }
+    });
+  }
+  pts.sort(function (a, b) { return a.date - b.date; });
+  return pts;
+}
+
 // Phase 13c: 運転管理月報シートの月初(R6)行に1日のデータと差分を書き込む
 // 月初データ列(C/D/E/F/J/L)と月初差分列(K/M)を埋める。
 // R7-R36 はテンプレート式(INDEX/MATCH、LOOKUP)で自動計算されるため触らない。
@@ -5328,34 +5449,8 @@ function fillKakeOperationReportSheet(wb, yyyy, mm) {
   setCell(ws, 6, 10, day1Data.returnSludge);  // J: 返送汚泥流量 累積
   setCell(ws, 6, 12, day1Data.excessSludge);  // L: 余剰汚泥流量 累積
 
-  // ===== R6: K/M 列に月初差分を書込 =====
-  // 前月最終点検日のデータから差分計算
-  try {
-    const holidaySet = getHolidaySetFromCache();
-    const firstMondayDate = getActualDate(1, "mon");
-    if (firstMondayDate) {
-      const prevLast = getPrevMonthLastDayData(weeklyData.targetMonth, firstMondayDate, holidaySet);
-      if (prevLast && prevLast.data) {
-        // K6: 返送汚泥流量 1日値 = 1日累積 − 前月末累積
-        const curR = (day1Data.returnSludge != null && day1Data.returnSludge !== "" && day1Data.returnSludge !== "-")
-          ? Number(day1Data.returnSludge) : null;
-        const prevR = (prevLast.data.returnSludge != null && prevLast.data.returnSludge !== "" && prevLast.data.returnSludge !== "-")
-          ? Number(prevLast.data.returnSludge) : null;
-        if (curR != null && !isNaN(curR) && prevR != null && !isNaN(prevR)) {
-          setCell(ws, 6, 11, curR - prevR);
-        }
-
-        // M6: 余剰汚泥流量 1日値 = 1日累積 − 前月末累積
-        const curE = (day1Data.excessSludge != null && day1Data.excessSludge !== "" && day1Data.excessSludge !== "-")
-          ? Number(day1Data.excessSludge) : null;
-        const prevE = (prevLast.data.excessSludge != null && prevLast.data.excessSludge !== "" && prevLast.data.excessSludge !== "-")
-          ? Number(prevLast.data.excessSludge) : null;
-        if (curE != null && !isNaN(curE) && prevE != null && !isNaN(prevE)) {
-          setCell(ws, 6, 13, curE - prevE);
-        }
-      }
-    }
-  } catch (e) { console.warn("月報R6: 月初差分書込失敗", e); }
+  // ===== K/M（返送汚泥/余剰汚泥の差分）は fillProratedFlowDiff が按分値で全ギャップ日に書込む =====
+  // （R6 を含む K/M 日次セルは fillProratedFlowDiff が null クリア後に値書込するため、ここでは触らない）
 }
 
 // 機器運転時間シート（加計浄化センター 21項目、29行ブロック）
