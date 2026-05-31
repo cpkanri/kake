@@ -1780,19 +1780,19 @@ const ELEC_SECTIONS = [
     { key: "returnFlowLook", label: "外観の確認", type: "toggle", options: ["○","△","×"] },
     { key: "returnFlowStatus", label: "指示状況の確認", type: "toggle", options: ["○","△","×"] },
     { key: "returnFlowReading", label: "流量計の読み", type: "number", step: "0.1", unit: "㎥/h" },
-    { key: "returnFlowTotal", label: "積算読み", type: "number", step: "1", unit: "㎥" },
+    // 積算読み(returnFlowTotal) は廃止: 日常水質 returnSludge を単一源として fillElecSheet が自動入力（二重入力解消）
   ]},
   { title: "余剰汚泥流量計", fields: [
     { key: "excessFlowLook", label: "外観の確認", type: "toggle", options: ["○","△","×"] },
     { key: "excessFlowStatus", label: "指示状況の確認", type: "toggle", options: ["○","△","×"] },
     { key: "excessFlowReading", label: "流量計の読み", type: "number", step: "0.1", unit: "㎥/h" },
-    { key: "excessFlowTotal", label: "積算読み", type: "number", step: "1", unit: "㎥" },
+    // 積算読み(excessFlowTotal) は廃止: 日常水質 excessSludge を単一源として fillElecSheet が自動入力（二重入力解消）
   ]},
   { title: "放流流量計", fields: [
     { key: "outFlowLook", label: "外観の確認", type: "toggle", options: ["○","△","×"] },
     { key: "outFlowStatus", label: "指示状況の確認", type: "toggle", options: ["○","△","×"] },
     { key: "outFlowReading", label: "流量計の読み", type: "number", step: "0.1", unit: "㎥/h" },
-    { key: "outFlowTotal", label: "積算読み", type: "number", step: "1", unit: "㎥" },
+    // 積算読み(outFlowTotal) は廃止: 日常水質 discharge を単一源として fillElecSheet が自動入力（二重入力解消）
   ]},
   { title: "汚濁負荷量計(放流水UV)", fields: [
     { key: "uvLook", label: "外観の確認", type: "toggle", options: ["○","△","×"] },
@@ -5620,9 +5620,11 @@ function fillElecSheet(ws, yyyy, mm) {
     // page 2 (R38=offset 35)
     pumpWellLook:35, pumpWellStatus:36, pumpWellReading:37,
     doLook:38, doStatus:39, doReading:40,
-    returnFlowLook:41, returnFlowStatus:42, returnFlowReading:43, returnFlowTotal:44,
-    excessFlowLook:45, excessFlowStatus:46, excessFlowReading:47, excessFlowTotal:48,
-    outFlowLook:49, outFlowStatus:50, outFlowReading:51, outFlowTotal:52,
+    // 積算読み(offset 44/48/52) は OFFSETS から除外。電気フォームの積算入力を廃止し、
+    // 日常水質 returnSludge/excessSludge/discharge を単一源として後段の専用ループで書込む（二重入力解消）。
+    returnFlowLook:41, returnFlowStatus:42, returnFlowReading:43,
+    excessFlowLook:45, excessFlowStatus:46, excessFlowReading:47,
+    outFlowLook:49, outFlowStatus:50, outFlowReading:51,
     uvLook:53, uvStatus:54, uvValue:55, codValue:56,
     tnLook:57, tnStatus:58, tnReading:59, tpReading:60,
     pressureLook:61, pressureStatus:62, pressureReading:63,
@@ -5684,6 +5686,27 @@ function fillElecSheet(ws, yyyy, mm) {
       }
       // 項目③: 点検者氏名(base+33=R36系) に月単位測定者を書く（電気データのある実測日のみ）
       if (inspName && hasElecData) setCell(ws, base + 33, col, inspName);
+    }
+  }
+
+  // ===== 積算読み(返送/余剰/放流) を日常水質の累積値から単一源で書込（電気の二重入力廃止） =====
+  // 源泉 = 運転管理月報 J/L/N と同一（日常水質 returnSludge/excessSludge/discharge）。
+  // 各週・各実測日列。日常水質が無データ/未入力の日は setCell が空値スキップ → 空欄維持。
+  // 電気データの有無に依存せず、水質データのある日に書く（単一の真実源）。
+  const TOTAL_SRC = { 44: "returnSludge", 48: "excessSludge", 52: "discharge" };
+  for (let w = 1; w <= 5; w++) {
+    const base = WEEK_START[w];
+    const wWater = weeklyData.weeks[w];
+    if (!wWater) continue;
+    for (const dk in DAY_COL) {
+      const actual = getActualDate(w, dk);
+      if (!actual || actual.getFullYear() !== yyyy || (actual.getMonth() + 1) !== mm) continue;
+      const wDay = wWater[dk];
+      if (!wDay) continue;
+      const col = DAY_COL[dk];
+      for (const off in TOTAL_SRC) {
+        setCell(ws, base + Number(off), col, wDay[TOTAL_SRC[off]]);
+      }
     }
   }
 }
@@ -5789,6 +5812,7 @@ function fillMechSheet(ws, yyyy, mm) {
     }
 
     if (!wData) continue;
+    const inspName = (weeklyData.monthInspector || "").trim(); // 日常水質/電気と同じ測定者名
     for (const dk in DAY_COL) {
       // 対象月チェック
       const actual = getActualDate(w, dk);
@@ -5797,6 +5821,10 @@ function fillMechSheet(ws, yyyy, mm) {
       const col = DAY_COL[dk];
       const day = wData[dk];
       if (!day) continue;
+      // 点検者(測定者名)書込用: 当日に機械データがあるか（実測日判定、電気の hasElecData と同パターン）
+      let hasMechData = false;
+      for (const k in MAP1) { const v = day[k]; if (v !== null && v !== undefined && v !== "") { hasMechData = true; break; } }
+      if (!hasMechData) { for (const k in MAP2) { const v = day[k]; if (v !== null && v !== undefined && v !== "") { hasMechData = true; break; } } }
       // 1/2 ページ: 絶対行(週1基準) + p1 オフセット
       // Phase 22: 数値型フィールドの未入力セルは「ー」を出力（トグル系は従来どおり空）
       // Phase 22 補追: 「ー」書込時は numFmt="@" を付与（テキスト書式に統一、表示崩れ防止）
@@ -5819,6 +5847,12 @@ function fillMechSheet(ws, yyyy, mm) {
         } else {
           setCell(ws, row2, col, val2);
         }
+      }
+      // 点検者(測定者名): 実測日列のみ。点検者行は page1=wk.p1+2(C2系) / page2=wk.p2+2(C68系)、
+      // 列は DAY_COL（日常水質/電気と同パターン）。無測定日・祝日は書かない＝空欄。
+      if (inspName && hasMechData) {
+        setCell(ws, wk.p1 + 2, col, inspName);
+        setCell(ws, wk.p2 + 2, col, inspName);
       }
     }
   }
