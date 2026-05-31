@@ -89,7 +89,8 @@ index.html から該当関数を**ブレースマッチで原文抽出**し、we
 - GAS/SS 無変更・clasp なし。`sw.js` を `kake-v42`→`kake-v43` に bump。
 
 ## 5. 最終 HEAD
-- commit: **{{HASH}}**。`index.html`（fixReportBlankZeros 汎用化 + wrapIndexBlankInSheet + fillProratedFlowDiff 系追加、fillKakeOperationReportSheet の K6/M6 削除）+ `sw.js`（v43）+ 本報告。
+- 実装コミット: **`75165443f44c8b343355e1c83ff7af1e17dede54`**（短縮 `7516544`）。`index.html`（fixReportBlankZeros 汎用化 + wrapIndexBlankInSheet + fillProratedFlowDiff 系追加、fillKakeOperationReportSheet の K6/M6 削除）+ `sw.js`（v42→v43）。
+- 本報告のハッシュ追記は後続コミットで push（repo 先頭はその追記コミット）。
 
 ## 6. 次フェーズ
 - Yamane 実機確認（Clear site data → ハードリロード sw v43 → 2026-05 出力 → Part1/Part2 目視）。
