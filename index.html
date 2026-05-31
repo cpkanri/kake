@@ -1739,7 +1739,7 @@ const ELEC_SECTIONS = [
   { title: "引込・受電", fields: [
     { key: "voltage", label: "電圧", type: "number", step: "0.1", unit: "KV" },
     { key: "voltageMode", label: "電圧モード", type: "toggle", options: ["RS","ST","TR"] },
-    { key: "powerFactor", label: "力率", type: "number", step: "0.01", unit: "ψ", dashSupport: true },
+    { key: "powerFactor", label: "力率", type: "number", step: "0.01", unit: "ψ", dashSupport: true, allowNegative: true },
     { key: "current", label: "電流", type: "number", step: "1", unit: "A" },
     { key: "currentMode", label: "電流モード", type: "toggle", options: ["R","S","T"] },
     { key: "ePowerRead", label: "普通電力量(×10kw) 読み", type: "number", step: "1", unit: "" },
@@ -1757,7 +1757,7 @@ const ELEC_SECTIONS = [
     { key: "current210", label: "動力(210V)電流", type: "number", step: "0.1", unit: "A" },
     { key: "current210Mode", label: "電流モード", type: "toggle", options: ["R","S","T"] },
     { key: "light210", label: "照明(210-105V)電流", type: "number", step: "0.1", unit: "A" },
-    { key: "lightMode", label: "照明モード", type: "toggle", options: ["R","S","T"] },
+    { key: "lightMode", label: "照明モード", type: "toggle", options: ["R","O","T"] },
     { key: "lowVoltSrc", label: "低圧分岐設備", type: "toggle", options: ["買電","自家発"] },
     { key: "ctrlPanel1Read", label: "動力制御盤1 読み", type: "number", step: "1", unit: "" },
     { key: "ctrlPanel1Use", label: "動力制御盤1 使用量", type: "number", step: "1", unit: "" },
@@ -2470,7 +2470,11 @@ function buildElecTable() {
         if (f.type === "number") {
           if (f.dashSupport) {
             // Phase 12 補追2: dashSupport: true のフィールド (力率等) は「-」と全角ハイフンを許容
-            html += '<td><input type="text" inputmode="decimal" data-elec-mech-numeric="1" placeholder="-" data-elec="' + f.key + '" data-eday="' + d + '"></td>';
+            // allowNegative: 負数入力可（力率 -0.78 等）。inputmode="decimal" のソフトキーボードは
+            // マイナスキーが無く負号を打てないため、inputmode="text" にして「-」を入力可能にする。
+            // バリデーション(isValidElecMechValue)は元から先頭"-"を許容、"-"単独はダッシュ、"-"+数字は負数。
+            const im = f.allowNegative ? "text" : "decimal";
+            html += '<td><input type="text" inputmode="' + im + '" data-elec-mech-numeric="1" placeholder="-" data-elec="' + f.key + '" data-eday="' + d + '"></td>';
           } else {
             html += '<td><input type="number" inputmode="decimal" step="' + f.step + '" data-elec="' + f.key + '" data-eday="' + d + '"></td>';
           }
