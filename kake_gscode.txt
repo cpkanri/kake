@@ -1571,3 +1571,166 @@ function swapElec_Phase39B3() {
   Logger.log('===== swapElec_Phase39B3 完了: ' + bakName + ' / ' + temp + '→' + orig + ' =====');
   return { status: 'OK', backup: bakName };
 }
+
+// ============================================================================
+// Phase 25-d-③: 日常水質 個別データ異常 補正 (2026-05-31)
+// 紙台帳記入済の正値テーブル(35セル/同梱 kake-25d3-corrections.csv)を内蔵し、
+// (month正規化, week, 曜日) の3キー一致で行を特定して上書き補正する。
+// 重複日(同一実日付が month×week 違いで複数行)対策のため、実日付/値では探さない。
+// idempotent + 内容ベース判定(行番号非依存): 現在値が current 一致時のみ補正、
+// 既に correct 化済なら skip、第3値なら停止せず skip+警告ログ。
+// dryRun デフォルト true (read のみ、SS 無変更)。本実行は
+// runRealCorrectWater_phase25d3() を editor で ▶。既存コード/FIELD_MAP は無改変。
+// ============================================================================
+// item_jp → 書込列(1始まり)/型 解決表 (kake_gscode.txt FIELD_MAP より):
+//   終沈水温=tempFinal(30) 終沈透視度=transFinal(31) 終沈PH=phFinal(32)
+//   ディッチ水温=tempDitch(15) 放流水温=tempOut(16) 測定者=inspector(29)
+var CORRECT_WATER_25D3_ITEMS = {
+  '終沈水温':   { col: 30, type: 'num' },
+  '終沈透視度': { col: 31, type: 'num' },
+  '終沈PH':     { col: 32, type: 'num' },
+  'ディッチ水温': { col: 15, type: 'num' },
+  '放流水温':   { col: 16, type: 'num' },
+  '測定者':     { col: 29, type: 'str' }
+};
+// 補正テーブル35エントリ (CSV と一致)。cur='(空)' は空セル限定で書込む透視度補正。
+var CORRECT_WATER_25D3_TABLE = [
+  { m: '2026-04', w: 5, d: '月', item: '終沈水温',   cur: '100.0', cor: '19.5' },
+  { m: '2026-04', w: 5, d: '火', item: '終沈水温',   cur: '100.0', cor: '20.4' },
+  { m: '2026-04', w: 5, d: '木', item: '終沈水温',   cur: '100.0', cor: '19.1' },
+  { m: '2026-05', w: 1, d: '月', item: 'ディッチ水温', cur: '98.0',  cor: '19.8' },
+  { m: '2026-05', w: 1, d: '月', item: '終沈水温',   cur: '6.61',  cor: '19.5' },
+  { m: '2026-05', w: 1, d: '月', item: '終沈透視度', cur: '(空)',  cor: '100'  },
+  { m: '2026-05', w: 1, d: '火', item: 'ディッチ水温', cur: '100.0', cor: '21'   },
+  { m: '2026-05', w: 1, d: '火', item: '放流水温',   cur: '100.0', cor: '20'   },
+  { m: '2026-05', w: 1, d: '火', item: '終沈水温',   cur: '6.66',  cor: '20.4' },
+  { m: '2026-05', w: 1, d: '火', item: '終沈透視度', cur: '(空)',  cor: '100'  },
+  { m: '2026-05', w: 1, d: '木', item: '終沈水温',   cur: '6.66',  cor: '19.1' },
+  { m: '2026-05', w: 1, d: '木', item: '終沈透視度', cur: '(空)',  cor: '100'  },
+  { m: '2026-05', w: 1, d: '金', item: 'ディッチ水温', cur: '99.0',  cor: '18.6' },
+  { m: '2026-05', w: 1, d: '金', item: '放流水温',   cur: '98.0',  cor: '18.3' },
+  { m: '2026-05', w: 2, d: '木', item: '終沈水温',   cur: '6.68',  cor: '20.4' },
+  { m: '2026-05', w: 2, d: '木', item: '終沈透視度', cur: '(空)',  cor: '100'  },
+  { m: '2026-05', w: 3, d: '月', item: '終沈水温',   cur: '6.65',  cor: '21.7' },
+  { m: '2026-05', w: 3, d: '月', item: '終沈透視度', cur: '6.65',  cor: '100'  },
+  { m: '2026-05', w: 3, d: '火', item: '終沈水温',   cur: '6.67',  cor: '21'   },
+  { m: '2026-05', w: 3, d: '火', item: '終沈透視度', cur: '6.67',  cor: '100'  },
+  { m: '2026-05', w: 3, d: '水', item: '終沈水温',   cur: '6.71',  cor: '22.8' },
+  { m: '2026-05', w: 3, d: '水', item: '終沈透視度', cur: '6.71',  cor: '100'  },
+  { m: '2026-05', w: 3, d: '木', item: '終沈水温',   cur: '6.65',  cor: '23.3' },
+  { m: '2026-05', w: 3, d: '木', item: '終沈透視度', cur: '6.65',  cor: '100'  },
+  { m: '2026-05', w: 4, d: '月', item: '終沈水温',   cur: '6.75',  cor: '24.2' },
+  { m: '2026-05', w: 4, d: '月', item: '終沈透視度', cur: '6.75',  cor: '100'  },
+  { m: '2026-05', w: 4, d: '火', item: '終沈水温',   cur: '6.82',  cor: '22.1' },
+  { m: '2026-05', w: 4, d: '火', item: '終沈透視度', cur: '6.82',  cor: '100'  },
+  { m: '2026-05', w: 4, d: '水', item: '終沈水温',   cur: '6.76',  cor: '22.1' },
+  { m: '2026-05', w: 4, d: '水', item: '終沈透視度', cur: '6.76',  cor: '100'  },
+  { m: '2026-05', w: 4, d: '木', item: '終沈水温',   cur: '6.78',  cor: '22.1' },
+  { m: '2026-05', w: 4, d: '木', item: '終沈透視度', cur: '6.78',  cor: '100'  },
+  { m: '2026-05', w: 4, d: '金', item: '測定者',     cur: '5.5',   cor: '栗栖　一成' },
+  { m: '2026-05', w: 4, d: '金', item: '終沈透視度', cur: '田中',  cor: '100'  },
+  { m: '2026-05', w: 4, d: '金', item: '終沈PH',     cur: '22.2',  cor: '6.81' }
+];
+
+// 内容一致判定: 文字列trim一致 または 数値一致 (型差 "100"/100, 6.61/"6.61" を吸収)
+function _vmatch25d3(a, b) {
+  var sa = (a === null || a === undefined) ? '' : String(a).trim();
+  var sb = (b === null || b === undefined) ? '' : String(b).trim();
+  if (sa === sb) return true;
+  var na = parseFloat(sa), nb = parseFloat(sb);
+  if (!isNaN(na) && !isNaN(nb) && na === nb) return true;
+  return false;
+}
+
+function correctWater_phase25d3(opts) {
+  opts = opts || {};
+  var dryRun = (opts.dryRun !== false); // 既定 true
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('日常水質');
+  if (!sheet) throw new Error('日常水質 シートが見つかりません');
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return { status: 'skip', reason: 'データ行なし' };
+
+  // 全行を1回読込 (N+1回避) → (month正規化|week|曜日) 索引マップ構築
+  var vals = sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn()).getValues();
+  var rowMap = {}; // key -> [絶対行,...]
+  for (var i = 0; i < vals.length; i++) {
+    var nm = normalizeMonth(vals[i][0]);
+    var wk = parseInt(String(vals[i][1]), 10);
+    var dy = (vals[i][2] === null || vals[i][2] === undefined) ? '' : String(vals[i][2]).trim();
+    var key = nm + '|' + wk + '|' + dy;
+    if (!rowMap[key]) rowMap[key] = [];
+    rowMap[key].push(i + 2);
+  }
+
+  var planned = [];        // 補正予定/実行
+  var skipAlready = [];    // 既に correct (再実行)
+  var warnThird = [];      // 第3値 (想定外・skip)
+  var warnNonEmpty = [];   // (空)期待だが非空かつ correct でない (skip)
+  var notFound = [];       // (month,week,day) 一致 0 行 (skip)
+
+  for (var e = 0; e < CORRECT_WATER_25D3_TABLE.length; e++) {
+    var ent = CORRECT_WATER_25D3_TABLE[e];
+    var res = CORRECT_WATER_25D3_ITEMS[ent.item];
+    if (!res) throw new Error('未解決 item_jp: ' + ent.item); // 推測で書かない
+    var ekey = ent.m + '|' + ent.w + '|' + ent.d;
+    var rows = rowMap[ekey] || [];
+    var tag = ent.m + ' W' + ent.w + ' ' + ent.d + ' ' + ent.item;
+
+    if (rows.length === 0) { notFound.push(tag); continue; }       // skip + log
+    if (rows.length > 1) {                                          // 複数一致 → 停止
+      throw new Error('停止: (month,week,day) が複数行に一致 [' + tag + '] rows=' + JSON.stringify(rows));
+    }
+    var r = rows[0];
+    var cellVal = vals[r - 2][res.col - 1];
+    var writeVal = (res.type === 'str') ? String(ent.cor) : Number(ent.cor);
+
+    var doWrite = false;
+    if (ent.cur === '(空)') {
+      if (cellVal === '' || cellVal === null || cellVal === undefined) {
+        doWrite = true;                                             // 空 → 補正
+      } else if (_vmatch25d3(cellVal, ent.cor)) {
+        skipAlready.push(tag);                                      // 既に 100
+      } else {
+        warnNonEmpty.push({ cell: tag, col: res.col, actual: String(cellVal), expectEmptyThenWrite: ent.cor });
+      }
+    } else {
+      if (_vmatch25d3(cellVal, ent.cor)) {
+        skipAlready.push(tag);                                      // 既に correct
+      } else if (_vmatch25d3(cellVal, ent.cur)) {
+        doWrite = true;                                             // current 一致 → 補正
+      } else {
+        warnThird.push({ cell: tag, col: res.col, actual: String(cellVal), expectCur: ent.cur, correct: ent.cor });
+      }
+    }
+
+    if (doWrite) {
+      planned.push({ row: r, col: res.col, cell: tag, from: String(cellVal), to: ent.cor, type: res.type });
+      if (!dryRun) sheet.getRange(r, res.col).setValue(writeVal);
+    }
+  }
+
+  Logger.log('===== correctWater_phase25d3 (dryRun=' + dryRun + ') =====');
+  Logger.log('テーブル ' + CORRECT_WATER_25D3_TABLE.length + ' 件 / 補正' +
+    (dryRun ? '予定' : '実行') + ' ' + planned.length +
+    ' / skip(既正) ' + skipAlready.length +
+    ' / 警告(第3値) ' + warnThird.length +
+    ' / 警告(空期待だが非空) ' + warnNonEmpty.length +
+    ' / 不一致(0行) ' + notFound.length);
+  Logger.log('--- 補正対象 ---\n' + JSON.stringify(planned, null, 2));
+  if (skipAlready.length) Logger.log('--- skip(既正) ---\n' + JSON.stringify(skipAlready, null, 2));
+  if (warnThird.length)   Logger.log('--- 警告(第3値) ---\n' + JSON.stringify(warnThird, null, 2));
+  if (warnNonEmpty.length) Logger.log('--- 警告(空期待だが非空) ---\n' + JSON.stringify(warnNonEmpty, null, 2));
+  if (notFound.length)    Logger.log('--- 不一致(0行) ---\n' + JSON.stringify(notFound, null, 2));
+
+  return {
+    status: 'ok', dryRun: dryRun, tableCount: CORRECT_WATER_25D3_TABLE.length,
+    corrected: planned.length, skipAlready: skipAlready.length,
+    warnThird: warnThird.length, warnNonEmpty: warnNonEmpty.length, notFound: notFound.length,
+    planned: planned, warnThirdDetail: warnThird, warnNonEmptyDetail: warnNonEmpty, notFoundDetail: notFound
+  };
+}
+
+function runRealCorrectWater_phase25d3() {
+  return correctWater_phase25d3({ dryRun: false });
+}
