@@ -1852,50 +1852,50 @@ const MECH_DAYS = ["mon", "tue", "wed", "thu", "fri"];
 const MECH_SECTIONS = [
   // ===== ページ 1/2 =====
   { title: "ポンプ井", fields: [
-    { key: "pumpWellCheck", label: "内部状況確認", type: "toggle", options: ["○","△","×","-"] },
+    { key: "pumpWellCheck", label: "内部状況確認", type: "toggle", options: ["○","△","×"], dash: true },
   ]},
   { title: "汚水ポンプ No.1", fields: [
     { key: "sewagePump1Current", label: "電流値", type: "number", step: "0.1", unit: "A" },
     { key: "sewagePump1Pressure", label: "吐出圧力", type: "number", step: "0.01", unit: "Mpa" },
-    { key: "sewagePump1Vibration", label: "異音・振動", type: "toggle", options: ["○","△","×","-"] },
+    { key: "sewagePump1Vibration", label: "異音・振動", type: "toggle", options: ["○","△","×"], dash: true },
   ]},
   { title: "汚水ポンプ No.2", fields: [
     { key: "sewagePump2Current", label: "電流値", type: "number", step: "0.1", unit: "A" },
     { key: "sewagePump2Pressure", label: "吐出圧力", type: "number", step: "0.01", unit: "Mpa" },
-    { key: "sewagePump2Vibration", label: "異音・振動", type: "toggle", options: ["○","△","×","-"] },
+    { key: "sewagePump2Vibration", label: "異音・振動", type: "toggle", options: ["○","△","×"], dash: true },
   ]},
   { title: "汚水ポンプ 共通", fields: [
     { key: "sewagePumpMode", label: "モード確認", type: "toggle", options: ["自動","手動"] },
     { key: "sewagePumpSelect", label: "常用機選択", type: "toggle", options: ["No.1","No.2","交互"] },
   ]},
   { title: "スクリーンユニット", fields: [
-    { key: "screenVibration", label: "異音・振動", type: "toggle", options: ["○","△","×","-"] },
-    { key: "screenDebris", label: "し渣量の確認", type: "toggle", options: ["○","△","×","-"] },
+    { key: "screenVibration", label: "異音・振動", type: "toggle", options: ["○","△","×"], dash: true },
+    { key: "screenDebris", label: "し渣量の確認", type: "toggle", options: ["○","△","×"], dash: true },
     { key: "screenOperation", label: "運転動作", type: "toggle", options: ["○","×"] },
   ]},
   { title: "エアレーション装置 No.1-1", fields: [
     { key: "aeration11Current", label: "電流値", type: "number", step: "0.1", unit: "A" },
-    { key: "aeration11Vibration", label: "異音・振動", type: "toggle", options: ["○","△","×","-"] },
+    { key: "aeration11Vibration", label: "異音・振動", type: "toggle", options: ["○","△","×"], dash: true },
     { key: "aeration11Mode", label: "モード確認", type: "toggle", options: ["自動","手動"] },
   ]},
   { title: "エアレーション装置 No.1-2", fields: [
     { key: "aeration12Current", label: "電流値", type: "number", step: "0.1", unit: "A" },
-    { key: "aeration12Vibration", label: "異音・振動", type: "toggle", options: ["○","△","×","-"] },
+    { key: "aeration12Vibration", label: "異音・振動", type: "toggle", options: ["○","△","×"], dash: true },
     { key: "aeration12Mode", label: "モード確認", type: "toggle", options: ["自動","手動"] },
   ]},
   { title: "曝気ブロワ No.1", fields: [
     { key: "aerationBlower1Current", label: "電流値", type: "number", step: "0.1", unit: "A" },
-    { key: "aerationBlower1Vibration", label: "異音・振動", type: "toggle", options: ["○","△","×","-"] },
+    { key: "aerationBlower1Vibration", label: "異音・振動", type: "toggle", options: ["○","△","×"], dash: true },
     { key: "aerationBlower1Mode", label: "モード確認", type: "toggle", options: ["自動","手動"] },
   ]},
   { title: "曝気ブロワ No.2", fields: [
     { key: "aerationBlower2Current", label: "電流値", type: "number", step: "0.1", unit: "A" },
-    { key: "aerationBlower2Vibration", label: "異音・振動", type: "toggle", options: ["○","△","×","-"] },
+    { key: "aerationBlower2Vibration", label: "異音・振動", type: "toggle", options: ["○","△","×"], dash: true },
     { key: "aerationBlower2Mode", label: "モード確認", type: "toggle", options: ["自動","手動"] },
   ]},
   { title: "消泡装置", fields: [
-    { key: "defoamNozzle", label: "消泡ノズル", type: "toggle", options: ["○","△","×","-"] },
-    { key: "defoamStatus", label: "消泡状態", type: "toggle", options: ["○","△","×","-"] },
+    { key: "defoamNozzle", label: "消泡ノズル", type: "toggle", options: ["○","△","×"], dash: true },
+    { key: "defoamStatus", label: "消泡状態", type: "toggle", options: ["○","△","×"], dash: true },
   ]},
   { title: "ディッチ流出可動堰", fields: [
     { key: "ditchWeir", label: "開度", type: "number", step: "1", unit: "mm" },
@@ -1908,21 +1908,21 @@ const MECH_SECTIONS = [
   ]},
   { title: "終沈汚泥掻寄機", fields: [
     { key: "finalScraperCurrent", label: "電流値", type: "number", step: "0.01", unit: "A" },
-    { key: "finalScraperVibration", label: "異音・振動等", type: "toggle", options: ["○","△","×","-"] },
+    { key: "finalScraperVibration", label: "異音・振動等", type: "toggle", options: ["○","△","×"], dash: true },
   ]},
   { title: "スカムスキマー (終沈)", fields: [
-    { key: "finalSkimmerOperation", label: "動作状況", type: "toggle", options: ["○","△","×","-"] },
-    { key: "finalSkimmerScum", label: "スカムの状況", type: "toggle", options: ["○","△","×","-"] },
+    { key: "finalSkimmerOperation", label: "動作状況", type: "toggle", options: ["○","△","×"], dash: true },
+    { key: "finalSkimmerScum", label: "スカムの状況", type: "toggle", options: ["○","△","×"], dash: true },
   ]},
   { title: "返送汚泥ポンプ No.1-1", fields: [
     { key: "returnPump11Current", label: "電流値", type: "number", step: "0.1", unit: "A" },
     { key: "returnPump11Pressure", label: "吐出圧力", type: "number", step: "0.01", unit: "Mpa" },
-    { key: "returnPump11Vibration", label: "異音・振動", type: "toggle", options: ["○","△","×","-"] },
+    { key: "returnPump11Vibration", label: "異音・振動", type: "toggle", options: ["○","△","×"], dash: true },
   ]},
   { title: "返送汚泥ポンプ No.1-2", fields: [
     { key: "returnPump12Current", label: "電流値", type: "number", step: "0.1", unit: "A" },
     { key: "returnPump12Pressure", label: "吐出圧力", type: "number", step: "0.01", unit: "Mpa" },
-    { key: "returnPump12Vibration", label: "異音・振動", type: "toggle", options: ["○","△","×","-"] },
+    { key: "returnPump12Vibration", label: "異音・振動", type: "toggle", options: ["○","△","×"], dash: true },
   ]},
   { title: "返送汚泥ポンプ 共通", fields: [
     { key: "returnPumpMode", label: "モード確認", type: "toggle", options: ["自動","手動"] },
@@ -1931,19 +1931,19 @@ const MECH_SECTIONS = [
   { title: "余剰汚泥ポンプ", fields: [
     { key: "excessPumpCurrent", label: "電流値", type: "number", step: "0.1", unit: "A" },
     { key: "excessPumpPressure", label: "吐出圧力", type: "number", step: "0.01", unit: "Mpa" },
-    { key: "excessPumpVibration", label: "異音・振動", type: "toggle", options: ["○","△","×","-"] },
+    { key: "excessPumpVibration", label: "異音・振動", type: "toggle", options: ["○","△","×"], dash: true },
     { key: "excessPumpLeak", label: "液漏れ", type: "toggle", options: ["無","有"] },
     { key: "excessPumpMode", label: "モード確認", type: "toggle", options: ["自動","手動"] },
   ]},
   { title: "床排水ポンプ No.1", fields: [
     { key: "drainPump1Current", label: "電流値", type: "number", step: "0.1", unit: "A" },
     { key: "drainPump1Pressure", label: "吐出圧力", type: "number", step: "0.01", unit: "Mpa" },
-    { key: "drainPump1Vibration", label: "異音・振動", type: "toggle", options: ["○","△","×","-"] },
+    { key: "drainPump1Vibration", label: "異音・振動", type: "toggle", options: ["○","△","×"], dash: true },
   ]},
   { title: "床排水ポンプ No.2", fields: [
     { key: "drainPump2Current", label: "電流値", type: "number", step: "0.1", unit: "A" },
     { key: "drainPump2Pressure", label: "吐出圧力", type: "number", step: "0.01", unit: "Mpa" },
-    { key: "drainPump2Vibration", label: "異音・振動", type: "toggle", options: ["○","△","×","-"] },
+    { key: "drainPump2Vibration", label: "異音・振動", type: "toggle", options: ["○","△","×"], dash: true },
   ]},
   { title: "床排水ポンプ 共通", fields: [
     { key: "drainPumpMode", label: "モード確認", type: "toggle", options: ["自動","手動"] },
@@ -1952,12 +1952,12 @@ const MECH_SECTIONS = [
   { title: "返流水ポンプ No.1", fields: [
     { key: "returnWater1Current", label: "電流値", type: "number", step: "0.1", unit: "A" },
     { key: "returnWater1Pressure", label: "吐出圧力", type: "number", step: "0.01", unit: "Mpa" },
-    { key: "returnWater1Vibration", label: "異音・振動", type: "toggle", options: ["○","△","×","-"] },
+    { key: "returnWater1Vibration", label: "異音・振動", type: "toggle", options: ["○","△","×"], dash: true },
   ]},
   { title: "返流水ポンプ No.2", fields: [
     { key: "returnWater2Current", label: "電流値", type: "number", step: "0.1", unit: "A" },
     { key: "returnWater2Pressure", label: "吐出圧力", type: "number", step: "0.01", unit: "Mpa" },
-    { key: "returnWater2Vibration", label: "異音・振動", type: "toggle", options: ["○","△","×","-"] },
+    { key: "returnWater2Vibration", label: "異音・振動", type: "toggle", options: ["○","△","×"], dash: true },
   ]},
   { title: "返流水ポンプ 共通", fields: [
     { key: "returnWaterMode", label: "モード確認", type: "toggle", options: ["自動","手動"] },
@@ -1967,12 +1967,12 @@ const MECH_SECTIONS = [
   { title: "濃縮汚泥引抜ポンプ No.1", fields: [
     { key: "thickPump1Current", label: "電流値", type: "number", step: "0.1", unit: "A" },
     { key: "thickPump1Pressure", label: "吐出圧力", type: "number", step: "0.01", unit: "Mpa" },
-    { key: "thickPump1Vibration", label: "異音・振動", type: "toggle", options: ["○","△","×","-"] },
+    { key: "thickPump1Vibration", label: "異音・振動", type: "toggle", options: ["○","△","×"], dash: true },
   ]},
   { title: "濃縮汚泥引抜ポンプ No.2", fields: [
     { key: "thickPump2Current", label: "電流値", type: "number", step: "0.1", unit: "A" },
     { key: "thickPump2Pressure", label: "吐出圧力", type: "number", step: "0.01", unit: "Mpa" },
-    { key: "thickPump2Vibration", label: "異音・振動", type: "toggle", options: ["○","△","×","-"] },
+    { key: "thickPump2Vibration", label: "異音・振動", type: "toggle", options: ["○","△","×"], dash: true },
   ]},
   { title: "濃縮汚泥引抜ポンプ 共通", fields: [
     { key: "thickPumpMode", label: "モード確認", type: "toggle", options: ["自動","手動"] },
@@ -1980,30 +1980,30 @@ const MECH_SECTIONS = [
   ]},
   { title: "濃縮汚泥掻寄機", fields: [
     { key: "thickScraperCurrent", label: "電流値", type: "number", step: "0.01", unit: "A" },
-    { key: "thickScraperVibration", label: "異音・振動", type: "toggle", options: ["○","△","×","-"] },
+    { key: "thickScraperVibration", label: "異音・振動", type: "toggle", options: ["○","△","×"], dash: true },
     { key: "thickScraperMode", label: "モード確認", type: "toggle", options: ["自動","手動"] },
   ]},
   { title: "スカムスキマー (濃縮)", fields: [
-    { key: "thickSkimmerOperation", label: "動作状況", type: "toggle", options: ["○","△","×","-"] },
-    { key: "thickSkimmerScum", label: "スカムの状況", type: "toggle", options: ["○","△","×","-"] },
+    { key: "thickSkimmerOperation", label: "動作状況", type: "toggle", options: ["○","△","×"], dash: true },
+    { key: "thickSkimmerScum", label: "スカムの状況", type: "toggle", options: ["○","△","×"], dash: true },
   ]},
   { title: "濃縮汚泥攪拌機", fields: [
     { key: "sludgeMixerCurrent", label: "電流値", type: "number", step: "0.1", unit: "A" },
-    { key: "sludgeMixerVibration", label: "異音・振動", type: "toggle", options: ["○","△","×","-"] },
+    { key: "sludgeMixerVibration", label: "異音・振動", type: "toggle", options: ["○","△","×"], dash: true },
     { key: "sludgeMixerMode", label: "モード確認", type: "toggle", options: ["自動","手動"] },
   ]},
   { title: "濃縮汚泥曝気ブロワ", fields: [
     { key: "thickAerationCurrent", label: "電流値", type: "number", step: "0.1", unit: "A" },
-    { key: "thickAerationVibration", label: "異音・振動", type: "toggle", options: ["○","△","×","-"] },
+    { key: "thickAerationVibration", label: "異音・振動", type: "toggle", options: ["○","△","×"], dash: true },
     { key: "thickAerationMode", label: "モード確認", type: "toggle", options: ["自動","手動"] },
   ]},
   { title: "自動給水装置 No.1", fields: [
     { key: "autoSupply1Current", label: "電流値", type: "number", step: "0.1", unit: "A" },
-    { key: "autoSupply1Vibration", label: "異音・振動等", type: "toggle", options: ["○","△","×","-"] },
+    { key: "autoSupply1Vibration", label: "異音・振動等", type: "toggle", options: ["○","△","×"], dash: true },
   ]},
   { title: "自動給水装置 No.2", fields: [
     { key: "autoSupply2Current", label: "電流値", type: "number", step: "0.1", unit: "A" },
-    { key: "autoSupply2Vibration", label: "異音・振動等", type: "toggle", options: ["○","△","×","-"] },
+    { key: "autoSupply2Vibration", label: "異音・振動等", type: "toggle", options: ["○","△","×"], dash: true },
   ]},
   { title: "自動給水装置 共通", fields: [
     { key: "autoSupplyMode", label: "モード確認", type: "toggle", options: ["自動","手動"] },
@@ -2012,7 +2012,7 @@ const MECH_SECTIONS = [
     { key: "mixingTankBG", label: "開閉", type: "toggle", options: ["開","閉"] },
   ]},
   { title: "塩素接触装置", fields: [
-    { key: "chlorineContact", label: "薬剤残量確認", type: "toggle", options: ["○","△","×","-"] },
+    { key: "chlorineContact", label: "薬剤残量確認", type: "toggle", options: ["○","△","×"], dash: true },
   ]},
   { title: "脱臭ファン", fields: [
     { key: "deodorFanCurrent", label: "電流値", type: "number", step: "0.1", unit: "A" },
@@ -2020,39 +2020,39 @@ const MECH_SECTIONS = [
     { key: "deodorFanMode", label: "モード確認", type: "toggle", options: ["自動","手動"] },
   ]},
   { title: "水処理用ダンパ", fields: [
-    { key: "treatDamperVibration", label: "異音・振動", type: "toggle", options: ["○","△","×","-"] },
+    { key: "treatDamperVibration", label: "異音・振動", type: "toggle", options: ["○","△","×"], dash: true },
     { key: "treatDamperMode", label: "モード確認", type: "toggle", options: ["自動","手動"] },
   ]},
   { title: "汚泥処理用ダンパ", fields: [
-    { key: "sludgeDamperVibration", label: "異音・振動", type: "toggle", options: ["○","△","×","-"] },
+    { key: "sludgeDamperVibration", label: "異音・振動", type: "toggle", options: ["○","△","×"], dash: true },
     { key: "sludgeDamperMode", label: "モード確認", type: "toggle", options: ["自動","手動"] },
   ]},
   { title: "吸着脱装置", fields: [
-    { key: "adsorptionMano", label: "マノメータ等の作動確認", type: "toggle", options: ["○","△","×","-"] },
-    { key: "adsorptionVibration", label: "異音・振動", type: "toggle", options: ["○","△","×","-"] },
+    { key: "adsorptionMano", label: "マノメータ等の作動確認", type: "toggle", options: ["○","△","×"], dash: true },
+    { key: "adsorptionVibration", label: "異音・振動", type: "toggle", options: ["○","△","×"], dash: true },
   ]},
   { title: "自家発室給気ファン", fields: [
-    { key: "generatorSupplyVibration", label: "異音・振動", type: "toggle", options: ["○","△","×","-"] },
+    { key: "generatorSupplyVibration", label: "異音・振動", type: "toggle", options: ["○","△","×"], dash: true },
     { key: "generatorSupplyMode", label: "モード確認", type: "toggle", options: ["自動","手動"] },
   ]},
   { title: "自家発室排気ファン", fields: [
-    { key: "generatorExhaustVibration", label: "異音・振動", type: "toggle", options: ["○","△","×","-"] },
+    { key: "generatorExhaustVibration", label: "異音・振動", type: "toggle", options: ["○","△","×"], dash: true },
     { key: "generatorExhaustMode", label: "モード確認", type: "toggle", options: ["自動","手動"] },
   ]},
   { title: "汚泥ポンプ室給気ファン", fields: [
-    { key: "sludgeRoomSupplyVibration", label: "異音・振動", type: "toggle", options: ["○","△","×","-"] },
+    { key: "sludgeRoomSupplyVibration", label: "異音・振動", type: "toggle", options: ["○","△","×"], dash: true },
     { key: "sludgeRoomSupplyMode", label: "モード確認", type: "toggle", options: ["自動","手動"] },
   ]},
   { title: "汚泥ポンプ室排気ファン", fields: [
-    { key: "sludgeRoomExhaustVibration", label: "異音・振動", type: "toggle", options: ["○","△","×","-"] },
+    { key: "sludgeRoomExhaustVibration", label: "異音・振動", type: "toggle", options: ["○","△","×"], dash: true },
     { key: "sludgeRoomExhaustMode", label: "モード確認", type: "toggle", options: ["自動","手動"] },
   ]},
   { title: "脱水機室給気ファン", fields: [
-    { key: "dewateringSupplyVibration", label: "異音・振動", type: "toggle", options: ["○","△","×","-"] },
+    { key: "dewateringSupplyVibration", label: "異音・振動", type: "toggle", options: ["○","△","×"], dash: true },
     { key: "dewateringSupplyMode", label: "モード確認", type: "toggle", options: ["自動","手動"] },
   ]},
   { title: "脱水機室排気ファン", fields: [
-    { key: "dewateringExhaustVibration", label: "異音・振動", type: "toggle", options: ["○","△","×","-"] },
+    { key: "dewateringExhaustVibration", label: "異音・振動", type: "toggle", options: ["○","△","×"], dash: true },
     { key: "dewateringExhaustMode", label: "モード確認", type: "toggle", options: ["自動","手動"] },
   ]},
 ];
@@ -2486,6 +2486,8 @@ function buildElecTable() {
       btn.dataset.val = newVal;
       btn.textContent = newVal;
       btn.classList.remove("copied");
+      // Part2: トグル変更を undo 記録（テキスト入力と同形式・1タップ1エントリ）
+      pushUndo({ sheet: "elec", week: currentWeek, day: btn.dataset.eday, field: btn.dataset.elec, oldValue: cur, newValue: newVal });
       // データに即時反映
       const week = weeklyData.electrical[currentWeek];
       if (week && week[btn.dataset.eday]) {
@@ -2758,6 +2760,8 @@ function buildMechTable() {
       btn.dataset.val = newVal;
       btn.textContent = newVal;
       btn.classList.remove("copied");
+      // Part2: トグル変更を undo 記録（テキスト入力と同形式・1タップ1エントリ）
+      pushUndo({ sheet: "mech", week: currentWeek, day: btn.dataset.mday, field: btn.dataset.mech, oldValue: cur, newValue: newVal });
       const week = weeklyData.mechanical[currentWeek];
       if (week && week[btn.dataset.mday]) {
         week[btn.dataset.mday][btn.dataset.mech] = newVal || null;
@@ -4680,20 +4684,21 @@ function formatHyphenForOutput(value) {
 
 // Phase 22: 機械設備で「-」自動出力する対象フィールドキー集合
 // - 数値型 (type==="number"): 未入力時に「-」出力
-// - Phase 22 補追 4: options に「-」を含むトグル (異音/振動等) も未入力時に「-」出力
-//   モード確認・常用機選択など options にハイフン非含有のトグルは自動除外（空欄維持）
+// - dash:true マーカーを持つトグル: 未入力時に「-」出力（旧 options に「-」を含んでいたトグルに付与）
+//   ※ Part3 でトグルの選択肢から「-」を除去したため、旧 f.options.indexOf("-") 判定は不発になる。
+//     代替として該当キーへ dash:true を明示付与し、空欄→「-」出力を従来通り維持（出力回帰なし）。
+// - モード確認(/Mode$/ または label==="モード確認"): 従来通り未入力時に「-」出力。
+//   常用機選択(*Select)は dash 無し・非モードのため対象外（空欄維持）のまま。
 const MECH_AUTO_DASH_KEYS = (function() {
   const set = new Set();
   MECH_SECTIONS.forEach(function(sec) {
     sec.fields.forEach(function(f) {
       if (f.type === "number") {
         set.add(f.key);
-      } else if (f.type === "toggle" && Array.isArray(f.options)) {
-        if (f.options.indexOf("-") >= 0) {
+      } else if (f.type === "toggle") {
+        if (f.dash === true) {
           set.add(f.key);
         } else if (/Mode$/.test(f.key) || f.label === "モード確認") {
-          // 項目②: モード確認(自動/手動)の空欄も他の「-」と同様に出力。
-          // 常用機選択(*Select)や異音振動(○△×)は対象外のまま（空欄維持）。
           set.add(f.key);
         }
       }
@@ -6287,6 +6292,16 @@ function attachUndoToTableInputs() {
 // Undoボタン
 document.getElementById("btnUndo").addEventListener("click", function() {
   if (undoStack.length === 0) return;
+
+  // Part1: まず現在アクティブなフォームの全DOM値を weeklyData へ非破壊コミット。
+  // これをしないと、未コミットの編集（テキスト/トグル）が直後の load*DataToForm 再描画で
+  // 古い/空の weeklyData により上書きされ「その日付列のデータが全消し」になる。
+  // コミット後に当該1フィールドのみ oldValue を適用するため、他フィールドは保持される（＝1編集のみ取消）。
+  if (currentSheet === "water") saveFormToData();
+  else if (currentSheet === "equip") saveEquipFormToData();
+  else if (currentSheet === "elec") saveElecFormToData();
+  else if (currentSheet === "mech") saveMechFormToData();
+
   var entry = undoStack.pop();
   var val = entry.oldValue === "" ? null : (isNaN(Number(entry.oldValue)) ? entry.oldValue : Number(entry.oldValue));
 
