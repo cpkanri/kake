@@ -2208,13 +2208,20 @@ function computeDate(weekIdx, dayKey) {
   return (d.getMonth() + 1) + "/" + d.getDate();
 }
 
-function isDayFilled(weekIdx, dayKey) {
-  const day = weeklyData.weeks[weekIdx] && weeklyData.weeks[weekIdx][dayKey];
-  if (!day) return false;
+// Phase 25-e-fix: その日に「実測データ」があるか（測定者 inspector・備考 bikou は実測に数えない）。
+// チェックマーク表示(isDayFilled)と月単位測定者の展開ガード(applyMonthInspectorToAllDays)で共用。
+function dayHasMeasurement(day) {
+  if (!day || typeof day !== "object") return false;
   return ALL_FIELDS.some(k => {
+    if (k === "inspector" || k === "bikou") return false;
     const v = day[k];
     return v !== null && v !== undefined && v !== "";
   });
+}
+
+function isDayFilled(weekIdx, dayKey) {
+  const day = weeklyData.weeks[weekIdx] && weeklyData.weeks[weekIdx][dayKey];
+  return dayHasMeasurement(day);
 }
 
 // ===== 機能1: 入力パーセンテージ計算 =====
@@ -3233,13 +3240,14 @@ function isValidElecMechValue(value) {
   return /^-?\d*\.?\d*$/.test(v);
 }
 
-// Phase 25-e (A方式): 月単位測定者(weeklyData.monthInspector)を per-day inspector へ展開。
-// 「測定データのある日」(inspector 以外に非空フィールドがある日)のみへ適用する。
-// → ensureWeeklyStructure は全25日(5週×5日)の空 day オブジェクトを生成し、かつ
-//    inspector は ALL_FIELDS に含まれるため、無条件に inspector を入れると
-//    buildWaterDaysPayload の hasAnyData が true になり「測定していない日に
-//    inspector だけの行」を作ってしまう。それを防ぐためのガード(§2-2.2 と整合)。
-// 既存の per-day inspector(legacy/他名) は他データの無い日では上書きしない＝壊さない。
+// Phase 25-e (A方式) / 25-e-fix: 月単位測定者(weeklyData.monthInspector)を per-day inspector へ展開。
+// 判定は共有述語 dayHasMeasurement(day)＝「実測データ(inspector/bikou 以外)がある日」のみ。
+// → ensureWeeklyStructure は全25日(5週×5日)の空 day を生成し、inspector/bikou は ALL_FIELDS に
+//    含まれるため、無条件展開や bikou を実測扱いすると「測定していない日(祝日/未実施)」にも
+//    inspector が入り誤✓を生む。実測ベース判定で根絶する。
+// さらに、過去に実測なし日へ伝播した inspector は保存時に剥がす(誤✓のクリーンアップ)。
+// bikou だけの日は dayHasMeasurement=false → 測定者は入れない/既存 inspector は剥がすが、
+//   bikou 自体は保持され buildWaterDaysPayload が bikou のため行を残す(備考は消さない)。
 function applyMonthInspectorToAllDays() {
   const name = (weeklyData.monthInspector || "").trim();
   if (!name) return;
@@ -3248,13 +3256,11 @@ function applyMonthInspectorToAllDays() {
     const week = weeks[w] || {};
     Object.keys(week).forEach(dayKey => {
       const day = week[dayKey];
-      if (!day || typeof day !== "object") return;
-      const hasOther = ALL_FIELDS.some(k => {
-        if (k === "inspector") return false;
-        const v = day[k];
-        return v !== null && v !== undefined && v !== "";
-      });
-      if (hasOther) day.inspector = name;
+      if (dayHasMeasurement(day)) {
+        day.inspector = name;                 // 実測がある日のみ展開
+      } else if (day && typeof day === "object" && day.inspector) {
+        day.inspector = "";                    // 実測なし日の過去伝播 inspector を剥がす（誤✓解消）
+      }
     });
   });
 }
