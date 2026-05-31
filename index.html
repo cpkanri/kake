@@ -2159,6 +2159,9 @@ function renderEquipTableRows() {
   }).join("");
   tbody.innerHTML = html;
   tbody.dataset.rendered = "1";
+  // 「戻す」(Undo): 機器運転時間テーブル生成直後に undo 記録リスナーを付与
+  // （init は async 認証 await 後に continueInit でここが呼ばれるため、トップレベルの早期付与では間に合わない）
+  if (typeof attachUndoToTableInputs === "function") attachUndoToTableInputs();
 }
 
 // 空の機器1週分データ（21機器 × 5曜日 = 105セル）
@@ -2538,6 +2541,9 @@ function buildElecTable() {
       recomputeElecAutoCalcCell(day, key);
     });
   });
+  // 「戻す」(Undo): テーブル再生成のたびに新規 input へ undo 記録リスナーを再付与
+  // （init は async 認証 await 後に build されるため、最初の build 時にここで確実に付与される）
+  if (typeof attachUndoToTableInputs === "function") attachUndoToTableInputs();
 }
 
 function saveElecFormToData() {
@@ -2787,6 +2793,8 @@ function buildMechTable() {
       }
     });
   });
+  // 「戻す」(Undo): テーブル再生成のたびに新規 input へ undo 記録リスナーを再付与
+  if (typeof attachUndoToTableInputs === "function") attachUndoToTableInputs();
 }
 
 function saveMechFormToData() {
