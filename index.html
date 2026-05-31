@@ -4898,6 +4898,10 @@ async function exportExcel() {
   // Phase 13c: 運転管理月報の月初(R6)行に1日データと差分を書込
   try { fillKakeOperationReportSheet(wb, yyyy, mm); } catch (e) { console.error("fillKakeOperationReportSheet:", e); }
 
+  // 無データ日「0 表示」→ 空欄化: 水質管理報告の INDEX/MATCH 数式を IF(ISBLANK(INDEX),"",INDEX) で包む
+  // （他 PWA 書込が全て終わった後に実行。終沈派生式 IF(C="",..) は C が "" を返すことで連鎖空欄化）
+  try { fixReportBlankZeros(wb); } catch (e) { console.error("fixReportBlankZeros:", e); }
+
   let out = await wb.xlsx.writeBuffer();
   out = await sanitizeXlsxBuffer(out);
   const blob = new Blob([out], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
@@ -5229,6 +5233,66 @@ function fillReportFinalData(wb, yyyy, mm) {
     ws.getCell(r, 5).value = { formula: 'IF(C' + r + '="","","透明")' }; // 外観 終沈
     ws.getCell(r, 9).value = { formula: 'IF(G' + r + '="","","無")' };   // 臭気 終沈
   }
+}
+
+// ===== 水質管理報告: 無データ日の「0 表示」を空欄化 =====
+// テンプレ常駐の INDEX/MATCH 数式（数値1/2: C/D/F/G/H/J/K/M/O/P/Q 行8-38、
+// 外観臭気2/2: C/D/F/G/H/J 行49-79）は、源泉(日常水質)の無データ日セルが真に空のとき
+// INDEX が 0 を返すため 0/0.0/0.00 が表示される。各 INDEX(...) を
+// IF(ISBLANK(INDEX(...)),"",INDEX(...)) で包んで以下を実現する:
+//   - 源泉が真に空（無データ日）   → ISBLANK=TRUE  → ""（空欄化）
+//   - 源泉が実測 0                 → ISBLANK=FALSE → 0 を保持（実測0と無データを区別）
+//   - MATCH 失敗（土日）           → INDEX エラー → 既存 IFERROR 5週ネストが次週/最終 "" へフォールバック（土日空欄維持）
+// 外観/臭気の終沈派生式 IF(C="","","透明") / IF(G="","","無") は、C/G が "" を返すことで連鎖的に空欄化する。
+// 集計行（39 MAX / 40 AVERAGE / 41 MIN）は日次セルが "" を返せば数値以外を無視するため自動で正常化する。
+function fixReportBlankZeros(wb) {
+  const ws = wb.getWorksheet("水質管理報告");
+  if (!ws) return;
+  ws.eachRow({ includeEmpty: false }, function (row) {
+    row.eachCell({ includeEmpty: false }, function (cell) {
+      const v = cell.value;
+      if (v && typeof v === "object" && typeof v.formula === "string" && v.formula.indexOf("INDEX(") >= 0) {
+        const nf = guardIndexBlank(v.formula);
+        if (nf !== v.formula) cell.value = { formula: nf };
+      }
+    });
+  });
+}
+
+// 数式文字列中のトップレベル INDEX(...) を IF(ISBLANK(INDEX(...)),"",INDEX(...)) で包む。
+// 括弧の対応・文字列リテラルを考慮し、INDEX 内部は再走査しない（二重包み防止）。
+function guardIndexBlank(formula) {
+  let out = "", i = 0;
+  const n = formula.length;
+  while (i < n) {
+    const ch = formula[i];
+    // 文字列リテラルはそのまま転写（中の INDEX( を誤検出しない）
+    if (ch === '"') {
+      let j = i + 1;
+      while (j < n) { const stop = formula[j] === '"'; j++; if (stop) break; }
+      out += formula.slice(i, j);
+      i = j;
+      continue;
+    }
+    // 関数呼び出しとしての INDEX( を検出（直前が識別子文字でない）
+    if (formula.startsWith("INDEX(", i) &&
+        (i === 0 || !/[A-Za-z0-9_.]/.test(formula[i - 1]))) {
+      let depth = 0, j = i + 5; // i+5 = 直後の '(' の位置
+      for (; j < n; j++) {
+        const c = formula[j];
+        if (c === '"') { j++; while (j < n && formula[j] !== '"') j++; }
+        else if (c === '(') depth++;
+        else if (c === ')') { depth--; if (depth === 0) { j++; break; } }
+      }
+      const sub = formula.slice(i, j); // 完全な INDEX(...)
+      out += 'IF(ISBLANK(' + sub + '),"",' + sub + ')';
+      i = j;
+      continue;
+    }
+    out += ch;
+    i++;
+  }
+  return out;
 }
 
 // Phase 13c: 運転管理月報シートの月初(R6)行に1日のデータと差分を書き込む
