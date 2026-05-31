@@ -1150,6 +1150,18 @@ input[type="number"] {
 <!-- 入力フォーム（static HTML） -->
 <div class="form-wrap">
 
+  <!-- セクション0: 測定者（月単位・最上部）Phase 25-e -->
+  <!-- A方式: UI は月単位、保存時に applyMonthInspectorToAllDays() が per-day inspector へ展開。
+       data-field を付けない（汎用 per-day ループと分離するため id 専用）。 -->
+  <div class="section">
+    <div class="section-header">測定者（今月）</div>
+    <div class="field">
+      <span class="label">測定者名</span>
+      <span class="unit"></span>
+      <input type="text" id="monthInspector" placeholder="今月の測定者名">
+    </div>
+  </div>
+
   <!-- セクション1: 積算値・流量 -->
   <div class="section">
     <div class="section-header">積算値・流量</div>
@@ -1315,15 +1327,8 @@ input[type="number"] {
     </div>
   </div>
 
-  <!-- セクション7: 測定者 -->
-  <div class="section">
-    <div class="section-header">測定者</div>
-    <div class="field">
-      <span class="label">測定者名</span>
-      <span class="unit"></span>
-      <input type="text" data-field="inspector">
-    </div>
-  </div>
+  <!-- セクション7: 測定者 → Phase 25-e で月単位欄(#monthInspector・最上部)へ移動・統合。
+       per-day data-field="inspector" 欄は撤去（保存は applyMonthInspectorToAllDays で per-day へ展開）。 -->
 
   <!-- セクション8: 備考 -->
   <div class="section">
@@ -2111,6 +2116,8 @@ function emptyEquipWeek() {
 
 function ensureWeeklyStructure() {
   if (!weeklyData.weeks || typeof weeklyData.weeks !== "object") weeklyData.weeks = {};
+  // Phase 25-e: 月単位測定者（A方式・UIだけ月単位、保存は per-day inspector へ展開）
+  if (typeof weeklyData.monthInspector !== "string") weeklyData.monthInspector = "";
   if (!weeklyData.equipment || typeof weeklyData.equipment !== "object") weeklyData.equipment = {};
   if (!weeklyData.electrical || typeof weeklyData.electrical !== "object") weeklyData.electrical = {};
   if (!weeklyData.mechanical || typeof weeklyData.mechanical !== "object") weeklyData.mechanical = {};
@@ -2876,14 +2883,9 @@ function loadDataToForm() {
     const v = day[key];
     el.value = (v === null || v === undefined) ? "" : v;
   });
-  const inspEl = document.querySelector('[data-field="inspector"]');
-  if (inspEl && !inspEl.value) {
-    const last = localStorage.getItem("kake_last_inspector") || "";
-    if (last) {
-      inspEl.value = last;
-      day.inspector = last;
-    }
-  }
+  // Phase 25-e: per-day inspector 自動補完(旧 kake_last_inspector 流用)は撤去。
+  // 測定者は月単位欄(#monthInspector)へ一本化（syncMonthInspectorFromDays が反映、
+  // 保存時に applyMonthInspectorToAllDays が per-day へ展開）。
 }
 
 // ===== タブ更新 =====
@@ -3231,6 +3233,57 @@ function isValidElecMechValue(value) {
   return /^-?\d*\.?\d*$/.test(v);
 }
 
+// Phase 25-e (A方式): 月単位測定者(weeklyData.monthInspector)を per-day inspector へ展開。
+// 「測定データのある日」(inspector 以外に非空フィールドがある日)のみへ適用する。
+// → ensureWeeklyStructure は全25日(5週×5日)の空 day オブジェクトを生成し、かつ
+//    inspector は ALL_FIELDS に含まれるため、無条件に inspector を入れると
+//    buildWaterDaysPayload の hasAnyData が true になり「測定していない日に
+//    inspector だけの行」を作ってしまう。それを防ぐためのガード(§2-2.2 と整合)。
+// 既存の per-day inspector(legacy/他名) は他データの無い日では上書きしない＝壊さない。
+function applyMonthInspectorToAllDays() {
+  const name = (weeklyData.monthInspector || "").trim();
+  if (!name) return;
+  const weeks = weeklyData.weeks || {};
+  Object.keys(weeks).forEach(w => {
+    const week = weeks[w] || {};
+    Object.keys(week).forEach(dayKey => {
+      const day = week[dayKey];
+      if (!day || typeof day !== "object") return;
+      const hasOther = ALL_FIELDS.some(k => {
+        if (k === "inspector") return false;
+        const v = day[k];
+        return v !== null && v !== undefined && v !== "";
+      });
+      if (hasOther) day.inspector = name;
+    });
+  });
+}
+
+// Phase 25-e: per-day inspector の代表値(最初の非空)を月単位欄へ反映。
+// 見つからなければ kake_last_inspector を初期値に流用(任意・利便性／旧 L2879 の代替)。
+// 月切替・同期・初期描画後に呼ぶ。DOM(#monthInspector)へも反映する。
+function syncMonthInspectorFromDays() {
+  let found = "";
+  const weeks = weeklyData.weeks || {};
+  const wKeys = Object.keys(weeks);
+  outer:
+  for (let wi = 0; wi < wKeys.length; wi++) {
+    const week = weeks[wKeys[wi]] || {};
+    const dKeys = Object.keys(week);
+    for (let di = 0; di < dKeys.length; di++) {
+      const cell = week[dKeys[di]];
+      const v = cell && cell.inspector;
+      if (v != null && String(v).trim() !== "") { found = String(v).trim(); break outer; }
+    }
+  }
+  if (!found) {
+    found = (localStorage.getItem("kake_last_inspector") || "").trim();
+  }
+  weeklyData.monthInspector = found;
+  const el = document.getElementById("monthInspector");
+  if (el) el.value = found;
+}
+
 function saveToStorage() {
   // フォーム状態をデータに書き戻す
   if (currentSheet === "water") saveFormToData();
@@ -3241,6 +3294,10 @@ function saveToStorage() {
   // startDate はinput値ではなく対象月から常に再計算（readonly のため）
   weeklyData.startDate = estimateStartDate(weeklyData.targetMonth);
 
+  // Phase 25-e: 月単位測定者を per-day inspector へ展開してから永続化/送信。
+  // weeklyData のみ参照(DOM 直読みなし)。input イベントで monthInspector は同期済。
+  applyMonthInspectorToAllDays();
+
   // 容量超過対応の safeSetItem で保存
   const res = safeSetItem(storageKey(), JSON.stringify(weeklyData));
   if (!res.ok) {
@@ -3249,9 +3306,10 @@ function saveToStorage() {
     return false;
   }
 
-  const inspEl = document.querySelector('[data-field="inspector"]');
-  if (inspEl && inspEl.value) {
-    try { localStorage.setItem("kake_last_inspector", inspEl.value); } catch(e) {}
+  // Phase 25-e: kake_last_inspector は月単位値(weeklyData.monthInspector)から記録(DOM 直読みなし)
+  const insp = (weeklyData.monthInspector || "").trim();
+  if (insp) {
+    try { localStorage.setItem("kake_last_inspector", insp); } catch(e) {}
   }
   if (weeklyData.targetMonth) {
     try { localStorage.setItem("kake_current_month", weeklyData.targetMonth); } catch(e) {}
@@ -3715,6 +3773,7 @@ async function syncFromServer() {
       updateEquipWeekTabs();
       updateElecWeekTabs();
       updateMechWeekTabs();
+      syncMonthInspectorFromDays(); // Phase 25-e: サーバー同期後の代表値を月単位欄へ反映
       if (currentSheet === "water") loadDataToForm();
       else if (currentSheet === "equip") loadEquipDataToForm();
       else if (currentSheet === "elec") loadElecDataToForm();
@@ -3952,6 +4011,15 @@ function bindEvents() {
     });
   });
 
+  // Phase 25-e: 月単位測定者欄 → weeklyData.monthInspector へ同期 + markDirty
+  const monthInspectorEl = document.getElementById("monthInspector");
+  if (monthInspectorEl) {
+    monthInspectorEl.addEventListener("input", () => {
+      weeklyData.monthInspector = monthInspectorEl.value;
+      markDirty();
+    });
+  }
+
   // === Phase 17f: カスタム月選択モーダル ===
   (function setupTargetMonthModal() {
     const targetMonthEl = document.getElementById("targetMonth");
@@ -4098,6 +4166,7 @@ function bindEvents() {
     updateWeekTabs();
     updateDayTabs();
     loadDataToForm();
+    syncMonthInspectorFromDays(); // Phase 25-e: 切替先の月の測定者を欄へ反映（前月混入防止）
     showToast("対象月を " + newMonth + " に変更しました");
     // バックグラウンドでサーバーからも取得
     syncFromServer().then(() => updateMldoStatus()).catch(() => {});
@@ -5482,6 +5551,7 @@ async function continueInit() {
   updateWeekTabs();
   updateDayTabs();
   loadDataToForm();
+  syncMonthInspectorFromDays(); // Phase 25-e: 月単位測定者欄を反映
 
   // b. バックグラウンドでGASからデータ取得（接続確認を兼ねる）
   // Phase 19-E': サイレント失敗を debug ログで可視化（処理継続は変更なし）
