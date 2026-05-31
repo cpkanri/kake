@@ -5094,6 +5094,41 @@ function fillWaterSheet(ws, yyyy, mm, holidaySet) {
         setCell(ws, bikouRow, col, day.bikou);
       }
     }
+
+    // ===== Part①: N列(col14, 積算テーブル)に「次週の最初の平日」のデータを書く（従来仕様の復活） =====
+    // N列ヘッダの日付(上で書込済の nextWorkday)と同一日付の翌週(w+1)曜日データを引用し、
+    // 積算テーブル9項目(RUISAN_KEYS)のみ N列へ。測定テーブル(J〜N=当週月〜金)は触らない。
+    // w=5（次週=翌月）/ 該当日なし は空のまま。N列ヘッダ日付とN列データ日付は同一(nextWorkday)で一致。
+    if (nextWorkday && w < 5) {
+      const nextWk = weeklyData.weeks[w + 1];
+      if (nextWk) {
+        const nwStr = dateToStr(nextWorkday);
+        let nextDay = null;
+        for (const dk in DAY_COL_RUISAN) {
+          const ad = getActualDate(w + 1, dk);
+          if (ad && dateToStr(ad) === nwStr) { nextDay = nextWk[APP_KEY_MAP[dk]]; break; }
+        }
+        if (nextDay) {
+          for (const key of RUISAN_KEYS) {
+            const off = ITEM_OFFSETS[key];
+            if (off == null) continue;
+            setCell(ws, dataRowBase + off, NEXT_WEEK_COL, nextDay[key]);
+          }
+        }
+      }
+    }
+
+    // ===== Part②: 平均列(O=15, テンプレで O:R 結合済)に AVERAGE 数式を付与 =====
+    // テンプレに平均数式が存在しない（O列データセルは空）ため code で設定。fullCalcOnLoad で開封時再計算。
+    // 範囲は各テーブルの当週 月〜金（指示書例 =AVERAGE(I4:M4) に準拠、積算は次週 N 列を含めない）:
+    //   積算テーブル(RUISAN_KEYS)=I:M(9-13) / 測定テーブル=J:N(10-14)。AVERAGE は空セルを無視。
+    // IFERROR(...,"") で全空の行/週は #DIV/0! を出さず空表示（テンプレ既存の空挙動を維持）。
+    const AVG_COL = 15; // O列（O:R 結合のマスターセル）
+    for (const key in ITEM_OFFSETS) {
+      const row = dataRowBase + ITEM_OFFSETS[key];
+      const range = (RUISAN_KEYS.indexOf(key) >= 0) ? ('I' + row + ':M' + row) : ('J' + row + ':N' + row);
+      ws.getCell(row, AVG_COL).value = { formula: 'IFERROR(AVERAGE(' + range + '),"")' };
+    }
   }
 }
 
