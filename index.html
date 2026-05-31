@@ -489,6 +489,32 @@ header h1 {
 .elec-panel.visible { display: block; }
 .mech-panel { display: none; }
 .mech-panel.visible { display: block; }
+/* 出力ページ別サブタブ（1/2・2/2、吉和方式）。縦長解消が目的の軽量UI。
+   常時効かせる指定は基本定義（@media 外）に置く（@media 1100px は当環境で非発火）。 */
+.sub-tabs {
+  display: inline-flex;
+  gap: 2px;
+  margin: 8px 12px;
+  padding: 3px;
+  background: #eef2f7;
+  border-radius: 6px;
+}
+.sub-tabs button {
+  padding: 6px 16px;
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+  font-weight: 600;
+  color: #5a6a7d;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.sub-tabs button.active {
+  background: #fff;
+  color: #0d4f34;
+  box-shadow: 0 1px 3px rgba(0,0,0,.1);
+}
 .equip-table .section-row td {
   background: #eef5f1;
   color: #0d4f34;
@@ -1385,6 +1411,12 @@ input[type="number"] {
   <button type="button" data-week="5">第5週</button>
 </nav>
 
+<!-- 出力ページ別サブタブ（日常電気設備 1/2・2/2、縦長解消） -->
+<nav class="sub-tabs" id="elecPageTabs">
+  <button type="button" data-epage="1" class="active">1/2</button>
+  <button type="button" data-epage="2">2/2</button>
+</nav>
+
 <div class="equip-wrap">
   <table class="equip-table" id="elecTable">
     <thead>
@@ -1413,6 +1445,12 @@ input[type="number"] {
   <button type="button" data-week="3">第3週</button>
   <button type="button" data-week="4">第4週</button>
   <button type="button" data-week="5">第5週</button>
+</nav>
+
+<!-- 出力ページ別サブタブ（日常機械設備 1/2・2/2、縦長解消） -->
+<nav class="sub-tabs" id="mechPageTabs">
+  <button type="button" data-mpage="1" class="active">1/2</button>
+  <button type="button" data-mpage="2">2/2</button>
 </nav>
 
 <div class="equip-wrap">
@@ -2031,9 +2069,28 @@ let weeklyData = {
   mechanical: {}
 };
 
+// ===== 設備フォーム 出力ページ対応（サブタブ 1/2・2/2 表示用） =====
+// 各セクションに page(1/2) を付与。境界は Excel 出力(fillElecSheet OFFSETS / fillMechSheet MAP1·MAP2)
+// と一致させる: 電気 page2 開始 = "pumpWellLook"(offset35)、機械 page2 開始 = "thickPump1Current"(MAP2 row70)。
+// データ束縛・出力は不変。表示グルーピングのみ。先頭フィールドの key で境界判定（順序・キーは安定）。
+(function assignEquipFormPages() {
+  let pg = 1;
+  for (const sec of ELEC_SECTIONS) {
+    if (sec.fields && sec.fields[0] && sec.fields[0].key === "pumpWellLook") pg = 2;
+    sec.page = pg;
+  }
+  pg = 1;
+  for (const sec of MECH_SECTIONS) {
+    if (sec.fields && sec.fields[0] && sec.fields[0].key === "thickPump1Current") pg = 2;
+    sec.page = pg;
+  }
+})();
+
 let currentWeek = 1;
 let currentDay = "mon";
 let currentSheet = "water"; // "water", "equip", "elec", "mech"
+let currentElecPage = 1;    // 電気設備サブタブ 1/2・2/2（週切替と独立、保持）
+let currentMechPage = 1;    // 機械設備サブタブ 1/2・2/2（週切替と独立、保持）
 let isOnline = false;
 
 // ===== ユーティリティ =====
@@ -2383,6 +2440,8 @@ function buildElecTable() {
   const tbody = document.getElementById("elecBody");
   tbody.innerHTML = "";
   ELEC_SECTIONS.forEach(sec => {
+    // 出力ページ別サブタブ: 現在ページ以外のセクションは描画しない（表示グルーピングのみ）
+    if (sec.page && sec.page !== currentElecPage) return;
     // セクション見出し行
     const hdr = document.createElement("tr");
     hdr.className = "section-row";
@@ -2662,6 +2721,8 @@ function buildMechTable() {
   const tbody = document.getElementById("mechBody");
   tbody.innerHTML = "";
   MECH_SECTIONS.forEach(sec => {
+    // 出力ページ別サブタブ: 現在ページ以外のセクションは描画しない（表示グルーピングのみ）
+    if (sec.page && sec.page !== currentMechPage) return;
     const hdr = document.createElement("tr");
     hdr.className = "section-row";
     hdr.innerHTML = '<td colspan="6">' + sec.title + '</td>';
@@ -3966,6 +4027,32 @@ function bindEvents() {
       updateEquipWeekTabs();
       updateMechWeekTabs();
       loadElecDataToForm();
+    });
+  });
+
+  // 電気設備の出力ページ サブタブ（1/2・2/2）— 週切替と独立、ページ状態は保持
+  document.querySelectorAll("#elecPageTabs button").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const pg = Number(btn.dataset.epage);
+      if (pg === currentElecPage) return;
+      saveElecFormToData(); // 現ページの入力をモデルへ退避（他ページデータは不変）
+      currentElecPage = pg;
+      document.querySelectorAll("#elecPageTabs button").forEach(b => b.classList.toggle("active", b === btn));
+      buildElecTable();     // 新ページのみ再描画（全リスナー再バインド）
+      loadElecDataToForm(); // 現在週の値を再注入
+    });
+  });
+
+  // 機械設備の出力ページ サブタブ（1/2・2/2）— 週切替と独立、ページ状態は保持
+  document.querySelectorAll("#mechPageTabs button").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const pg = Number(btn.dataset.mpage);
+      if (pg === currentMechPage) return;
+      saveMechFormToData();
+      currentMechPage = pg;
+      document.querySelectorAll("#mechPageTabs button").forEach(b => b.classList.toggle("active", b === btn));
+      buildMechTable();
+      loadMechDataToForm();
     });
   });
 
