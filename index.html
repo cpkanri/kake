@@ -5159,8 +5159,8 @@ function fillWaterSheet(ws, yyyy, mm, holidaySet) {
       const odorMaster = ws.getCell(orB, 3); // C列=3
       const refAlign = ws.getCell(19 + offset, 3).alignment; // 外観マスター（中央表示OK）
       odorMaster.alignment = refAlign
-        ? Object.assign({}, refAlign, { horizontal: 'center', vertical: 'center' })
-        : { horizontal: 'center', vertical: 'center', wrapText: true };
+        ? Object.assign({}, refAlign, { horizontal: 'center', vertical: 'middle' })
+        : { horizontal: 'center', vertical: 'middle', wrapText: true };
     } catch (e) { console.error('腐敗臭 merge:', e); }
 
     // ===== 項目②(方針転換): 外観(R19-21)・臭気(R24-26) の固定値を「実測のある日の列のみ」へ書込 =====
