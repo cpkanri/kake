@@ -5035,6 +5035,29 @@ function fillWaterSheet(ws, yyyy, mm, holidaySet) {
       ws.getCell(dateRow, NEXT_WEEK_COL).value = null;
     }
 
+    // ===== 測定テーブルの測定日行(R14+offset, J〜N)にも日付を書く =====
+    // 真因: 上の積算テーブル dateRow(R3+offset, I〜M) のみ書いており、下段=測定テーブルの
+    //   測定日ヘッダ行(測定者 R15 の直上 = R14)が未書込のため下段測定日が空欄だった。
+    // 行: MEASURE_DATE_ROW_BASE=14（見出し R13-R14 / 測定者 INSP_ROW_BASE=15 の直上。
+    //     第2週 14+46=60 が実機「画面 Row60」と一致）。
+    // 列: J〜N（測定テーブルは I 列がラベルのため積算 I〜M に対し +1 ずれ。DAY_COL_MEASURE と同一）。
+    // 日付の値/書式は積算テーブルと厳密に同一（toExcelDate + numFmt、UTC正午で1日ずれ防止）。
+    const MEASURE_DATE_ROW_BASE = 14;
+    const measureDateRow = MEASURE_DATE_ROW_BASE + offset;
+    const MEASURE_DATE_COL = { mon: 10, tue: 11, wed: 12, thu: 13, fri: 14 }; // J〜N
+    for (const dk in MEASURE_DATE_COL) {
+      const col = MEASURE_DATE_COL[dk];
+      const actual = getActualDate(w, dk);
+      if (actual) {
+        const cell = ws.getCell(measureDateRow, col);
+        cell.value = toExcelDate(actual);
+        cell.numFmt = 'm"月"d"日("aaa")"';
+      } else {
+        // 月跨ぎ・対象外日は空に
+        ws.getCell(measureDateRow, col).value = null;
+      }
+    }
+
     // ===== 各曜日データを書き込み =====
     // アプリ側のデータキー: mon, tue, wed, thu, fri (Phase 25-c-ε で nextMon → fri に統一)
     // 加計: 積算値テーブル(Row4-12)用の列マッピング: I列起点
