@@ -1676,7 +1676,12 @@ const ALL_FIELDS = [
   "inspector", "bikou"
 ];
 
+// 前日コピー対象。Part2: 積算値・流量（電力量/上水/軽油/返送・余剰汚泥流量/放流流量）も対象に含める。
+// 除外は inspector（月単位で別管理）・bikou（備考メモ）のみ。トグル/空欄/"-" の扱いは forEach 側で不変。
 const COPY_FIELDS = [
+  "power200v", "power100v", "reactivePower", "demand",
+  "water", "diesel",
+  "returnSludge", "excessSludge", "discharge",
   "tempIn", "tempDitch", "tempOut",
   "transIn", "transOut",
   "phIn", "phDitch", "phOut",
@@ -2086,51 +2091,13 @@ let weeklyData = {
   }
 })();
 
-// ===== 数値表示: フィールド基準精度での「末尾0埋め」（丸めなし・保存型は数値のまま） =====
-// 症状: 「20.0」入力→保存(Number化)/同期で「20」になり小数0が消える。
-// 方針(推奨A): 保存・同期・Excel・按分は従来通り数値。フォームへ値を注入する時だけ、
-// フィールド基準精度(step 由来)に合わせ末尾0を補って表示する（丸め・桁落ちなし）。
-// 基準桁の所在: 水質/機器運転時間/電気数値inputは DOM の step 属性、step を持たない
-// 電気dashSupport・機械の数値textは ELEC_SECTIONS/MECH_SECTIONS の field.step から導出。
-function decimalsFromStep(step) {
-  if (step == null || step === "") return null;
-  const s = String(step);
-  const i = s.indexOf(".");
-  return i < 0 ? 0 : (s.length - i - 1);
-}
-// step を持たない電気/機械フィールドの基準桁マップ（名前空間付き）
-var FIELD_DECIMALS = {};
-[["elec", ELEC_SECTIONS], ["mech", MECH_SECTIONS]].forEach(function (pair) {
-  pair[1].forEach(function (sec) {
-    sec.fields.forEach(function (f) {
-      if (f.step != null) FIELD_DECIMALS[pair[0] + ":" + f.key] = decimalsFromStep(f.step);
-    });
-  });
-});
-// 入力要素の基準小数桁を返す（step 優先、無ければ field マップ、無ければ null）
-function getInputDecimals(el) {
-  const step = el.getAttribute && el.getAttribute("step");
-  if (step != null && step !== "") return decimalsFromStep(step);
-  if (el.dataset && el.dataset.elec != null && FIELD_DECIMALS["elec:" + el.dataset.elec] != null) return FIELD_DECIMALS["elec:" + el.dataset.elec];
-  if (el.dataset && el.dataset.mech != null && FIELD_DECIMALS["mech:" + el.dataset.mech] != null) return FIELD_DECIMALS["mech:" + el.dataset.mech];
-  return null;
-}
-// 値を minDecimals まで末尾0埋めして文字列化（丸めない＝基準以上の実小数は全桁保持）。
-// 数値文字列以外（""・"-"・トグル値"○"等）はそのまま返す。
-function padDecimals(value, minDecimals) {
-  if (value === null || value === undefined || value === "") return "";
-  let s = (typeof value === "number") ? String(value) : String(value).trim();
-  if (!/^-?\d*\.?\d+$/.test(s)) return s; // 非数値はそのまま（"-"・記号・トグル等）
-  if (minDecimals == null) return s;       // 基準桁不明なら埋めない
-  const neg = s.charAt(0) === "-";
-  if (neg) s = s.slice(1);
-  const dot = s.indexOf(".");
-  let intp = dot < 0 ? s : s.slice(0, dot);
-  let frac = dot < 0 ? "" : s.slice(dot + 1);
-  if (frac.length < minDecimals) frac = frac + "0".repeat(minDecimals - frac.length); // 不足分だけ0埋め
-  const out = frac.length ? (intp + "." + frac) : intp;                                // 基準0かつ整数は小数点なし
-  return (neg ? "-" : "") + out;
-}
+// ===== 数値の末尾0を「入力した分だけ」保持（過剰0埋め廃止・入力文字列を厳密保持） =====
+// 前回(1adf4a7)の step 基準0埋め(padDecimals)は過剰（step="0.01" で 869118→869118.00 等）。
+// 方針(Part1): save*FormToData で Number()化せず el.value の文字列をそのまま weeklyData に格納し、
+// load*DataToForm はその文字列を素のまま表示（0埋め・丸めなし＝入力通り）。
+// 数値が必要な箇所(Excel=setCell / 按分=flowNumOrNull / 電気使用量=Number / 検証)は既に Number() 化済み。
+// 同期往復(GAS/Sheets が数値型化し 20.0→20)は mergeServerData の preserve-guard で
+// 「ローカル文字列がサーバ数値と数値的に等しければローカル文字列を維持」して末尾0を保持（GAS/SS 無変更）。
 
 let currentWeek = 1;
 let currentDay = "mon";
@@ -2442,12 +2409,8 @@ function saveEquipFormToData() {
     const key = el.dataset.equip;
     const day = el.dataset.eday;
     if (!week[key]) return;
-    if (el.value === "") {
-      week[key][day] = null;
-    } else {
-      const num = Number(el.value);
-      week[key][day] = isNaN(num) ? el.value : num;
-    }
+    // Part1: 入力文字列をそのまま保持（末尾0を入力通りに）
+    week[key][day] = el.value === "" ? null : el.value;
   });
 }
 
@@ -2457,7 +2420,7 @@ function loadEquipDataToForm() {
     const key = el.dataset.equip;
     const day = el.dataset.eday;
     const v = week[key] ? week[key][day] : null;
-    el.value = (v === null || v === undefined) ? "" : padDecimals(v, getInputDecimals(el));
+    el.value = (v === null || v === undefined) ? "" : v; // Part1: 保持文字列を素表示
   });
 }
 
@@ -2607,17 +2570,10 @@ function saveElecFormToData() {
       if (el.value === "") {
         week[day][key] = null;
       } else if (el.dataset.elecMechNumeric === '1') {
-        // Phase 12 補追2: 「-」は文字列のまま、それ以外は数値化トライ
-        const v = el.value.trim();
-        if (v === '-') {
-          week[day][key] = '-';
-        } else {
-          const num = Number(v);
-          week[day][key] = isNaN(num) ? v : num;
-        }
+        // Part1: 入力文字列をそのまま保持（"-" 含む。末尾0を入力通りに、Number化しない）
+        week[day][key] = el.value.trim();
       } else if (el.type === "number") {
-        const num = Number(el.value);
-        week[day][key] = isNaN(num) ? el.value : num;
+        week[day][key] = el.value; // Part1: 文字列保持
       } else {
         week[day][key] = el.value;
       }
@@ -2643,7 +2599,7 @@ function loadElecDataToForm() {
           el.value = "";
         }
       } else {
-        el.value = padDecimals(v, getInputDecimals(el));
+        el.value = v; // Part1: 保持文字列を素表示
       }
     } else {
       // toggle button
@@ -2857,17 +2813,10 @@ function saveMechFormToData() {
       if (el.value === "") {
         week[day][key] = null;
       } else if (el.dataset.elecMechNumeric === '1') {
-        // Phase 12: 「-」は文字列のまま、それ以外は数値化トライ
-        const v = el.value.trim();
-        if (v === '-') {
-          week[day][key] = '-';
-        } else {
-          const num = Number(v);
-          week[day][key] = isNaN(num) ? v : num;
-        }
+        // Part1: 入力文字列をそのまま保持（"-" 含む。末尾0を入力通りに、Number化しない）
+        week[day][key] = el.value.trim();
       } else if (el.type === "number") {
-        const num = Number(el.value);
-        week[day][key] = isNaN(num) ? el.value : num;
+        week[day][key] = el.value; // Part1: 文字列保持
       } else {
         week[day][key] = el.value;
       }
@@ -2884,7 +2833,7 @@ function loadMechDataToForm() {
     const day = el.dataset.mday;
     const v = (week && week[day]) ? week[day][key] : null;
     if (el.tagName === "INPUT") {
-      el.value = (v === null || v === undefined) ? "" : padDecimals(v, getInputDecimals(el));
+      el.value = (v === null || v === undefined) ? "" : v; // Part1: 保持文字列を素表示
     } else {
       const val = (v === null || v === undefined) ? "" : String(v);
       el.dataset.val = val;
@@ -2987,12 +2936,8 @@ function saveFormToData() {
     if (el.tagName === "BUTTON" && el.classList.contains("toggle-btn")) {
       day[key] = el.dataset.val || null;
     } else if (el.type === "number") {
-      if (el.value === "") {
-        day[key] = null;
-      } else {
-        const num = Number(el.value);
-        day[key] = isNaN(num) ? el.value : num;
-      }
+      // Part1: 入力文字列をそのまま保持（末尾0を入力通りに。Number化しない＝過剰0埋め/桁落ちなし）
+      day[key] = el.value === "" ? null : el.value;
     } else if (key === "bikou") {
       // Phase 18-b: bikou に ISO タイムスタンプが入っていれば空に
       day[key] = sanitizeBikou(el.value);
@@ -3007,8 +2952,8 @@ function loadDataToForm() {
   document.querySelectorAll("[data-field]").forEach(el => {
     const key = el.dataset.field;
     const v = day[key];
-    // 数値inputは基準精度で末尾0埋め表示（丸めなし）。非数値/トグル値は padDecimals がそのまま返す。
-    el.value = (v === null || v === undefined) ? "" : padDecimals(v, getInputDecimals(el));
+    // Part1: 保持文字列を素のまま表示（入力通りの末尾0・丸めなし・過剰0埋めなし）
+    el.value = (v === null || v === undefined) ? "" : v;
   });
   // Phase 25-e: per-day inspector 自動補完(旧 kake_last_inspector 流用)は撤去。
   // 測定者は月単位欄(#monthInspector)へ一本化（syncMonthInspectorFromDays が反映、
@@ -3722,6 +3667,20 @@ function _arrayToNested_mechanical(arr) {
 }
 
 // サーバーデータをマージ
+// Part1: 同期マージ時の末尾0保持ガード。
+// 同期往復(GAS/Sheets)は数値型化で 20.0→20 と桁落ちするが「値自体」は変えない。
+// よってローカルが非空の数値文字列で、サーバ値と数値的に等しいなら、ローカル文字列を維持する。
+// （値が実際に異なる＝他端末で更新された場合のみサーバ値を採用。GAS/SS 変更不要で末尾0を保持）
+function mergeFieldPreserveTypedZero(target, key, srcVal) {
+  const cur = target[key];
+  if (typeof cur === "string" && cur.trim() !== "" &&
+      srcVal !== null && srcVal !== undefined && srcVal !== "") {
+    const a = Number(cur), b = Number(srcVal);
+    if (!isNaN(a) && !isNaN(b) && a === b) return; // 数値的に同一 → ローカル文字列(末尾0)を維持
+  }
+  target[key] = srcVal;
+}
+
 function mergeServerData(serverData, expectedMonth) {
   const summary = { water_days: 0, equipment_weeks: 0, electrical_days: 0, mechanical_days: 0, merged: false };
   if (!serverData) return summary;
@@ -3772,7 +3731,7 @@ function mergeServerData(serverData, expectedMonth) {
                 if (window.EXCEL_WRITE_MAP_NULL_SKIP_KEYS_DIRECT &&
                     window.EXCEL_WRITE_MAP_NULL_SKIP_KEYS_DIRECT.indexOf(k) >= 0 &&
                     (src[k] === null || src[k] === undefined || src[k] === '')) return;
-                target[k] = src[k];
+                mergeFieldPreserveTypedZero(target, k, src[k]); // Part1: 末尾0保持
               });
             }
             summary.water_days++;
@@ -3803,7 +3762,7 @@ function mergeServerData(serverData, expectedMonth) {
               Object.keys(dayData).forEach(d => {
                 const dayCode = DAY_JP_TO_CODE[d] || d;
                 if (dayCode in weeklyData.equipment[w][key]) {
-                  weeklyData.equipment[w][key][dayCode] = dayData[d];
+                  mergeFieldPreserveTypedZero(weeklyData.equipment[w][key], dayCode, dayData[d]); // Part1: 末尾0保持
                   weekMerged = true;
                 }
               });
@@ -3830,7 +3789,7 @@ function mergeServerData(serverData, expectedMonth) {
             Object.keys(src).forEach(k => {
               // Phase 18-b: 予約フィールドは skip
               if (k === 'week' || k === 'day' || k === 'updatedAt') return;
-              target[k] = src[k];
+              mergeFieldPreserveTypedZero(target, k, src[k]); // Part1: 末尾0保持
             });
             summary.electrical_days++;
           }
@@ -3854,7 +3813,7 @@ function mergeServerData(serverData, expectedMonth) {
             Object.keys(src).forEach(k => {
               // Phase 18-b: 予約フィールドは skip
               if (k === 'week' || k === 'day' || k === 'updatedAt') return;
-              target[k] = src[k];
+              mergeFieldPreserveTypedZero(target, k, src[k]); // Part1: 末尾0保持
             });
             summary.mechanical_days++;
           }
@@ -6350,7 +6309,8 @@ document.getElementById("btnUndo").addEventListener("click", function() {
   else if (currentSheet === "mech") saveMechFormToData();
 
   var entry = undoStack.pop();
-  var val = entry.oldValue === "" ? null : (isNaN(Number(entry.oldValue)) ? entry.oldValue : Number(entry.oldValue));
+  // Part1: 文字列保持に合わせ、oldValue を Number 化せずそのまま戻す（末尾0/入力通りを維持）
+  var val = entry.oldValue === "" ? null : entry.oldValue;
 
   if (entry.sheet === "water") {
     weeklyData.weeks[entry.week][entry.day][entry.field] = val;
