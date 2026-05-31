@@ -4593,8 +4593,14 @@ const MECH_AUTO_DASH_KEYS = (function() {
     sec.fields.forEach(function(f) {
       if (f.type === "number") {
         set.add(f.key);
-      } else if (f.type === "toggle" && Array.isArray(f.options) && f.options.indexOf("-") >= 0) {
-        set.add(f.key);
+      } else if (f.type === "toggle" && Array.isArray(f.options)) {
+        if (f.options.indexOf("-") >= 0) {
+          set.add(f.key);
+        } else if (/Mode$/.test(f.key) || f.label === "モード確認") {
+          // 項目②: モード確認(自動/手動)の空欄も他の「-」と同様に出力。
+          // 常用機選択(*Select)や異音振動(○△×)は対象外のまま（空欄維持）。
+          set.add(f.key);
+        }
       }
     });
   });
@@ -5147,11 +5153,14 @@ function fillWaterSheet(ws, yyyy, mm, holidaySet) {
       try { ws.unMergeCells('C' + orB + ':F' + orE); } catch (e) {}
       try { ws.unMergeCells('G' + orB + ':H' + orE); } catch (e) {}
       ws.mergeCells('C' + orB + ':H' + orE);
-      // 腐敗臭マスター C{24} を上下左右中央＋折返しに（隣の外観 油膜・色合 C19 と同一: center/center/wrapText）
+      // 項目①: 腐敗臭マスター C{24} を確実に上下左右中央へ。前回 Object.assign マージでは
+      // テンプレ既存の vertical（下揃え）が残り下揃え表示になっていたため、正しく中央表示できている
+      // 隣の外観 油膜・色合マスター C{19} の alignment を丸ごとコピー（同一表示を保証）。
       const odorMaster = ws.getCell(orB, 3); // C列=3
-      odorMaster.alignment = Object.assign({}, odorMaster.alignment, {
-        horizontal: 'center', vertical: 'center', wrapText: true
-      });
+      const refAlign = ws.getCell(19 + offset, 3).alignment; // 外観マスター（中央表示OK）
+      odorMaster.alignment = refAlign
+        ? Object.assign({}, refAlign, { horizontal: 'center', vertical: 'center' })
+        : { horizontal: 'center', vertical: 'center', wrapText: true };
     } catch (e) { console.error('腐敗臭 merge:', e); }
 
     // ===== 項目②(方針転換): 外観(R19-21)・臭気(R24-26) の固定値を「実測のある日の列のみ」へ書込 =====
@@ -5397,7 +5406,23 @@ function fillElecSheet(ws, yyyy, mm) {
       cell.numFmt = 'd"日("aaa")"';
     }
 
+    // 項目④: page2(2/2) の「点検内容」行(=日付ヘッダ, base+34=R37系)にも page1 と同じ日付を書く。
+    // 従来は page1 ヘッダ(base-1)のみ書いていたため page2 の日付が空だった。月跨ぎ/対象外は空。
+    const page2DateRow = base + 34;
+    for (const dk in DAY_COL) {
+      const col = DAY_COL[dk];
+      const actual = getActualDate(w, dk);
+      if (!actual || actual.getFullYear() !== yyyy || (actual.getMonth() + 1) !== mm) {
+        ws.getCell(page2DateRow, col).value = null;
+        continue;
+      }
+      const c2 = ws.getCell(page2DateRow, col);
+      c2.value = toExcelDate(actual);
+      c2.numFmt = 'd"日("aaa")"';
+    }
+
     if (!wData) continue;
+    const inspName = (weeklyData.monthInspector || "").trim(); // 項目③: 日常水質と同じ測定者名
     for (const dk in DAY_COL) {
       const actual = getActualDate(w, dk);
       if (!actual) continue;
@@ -5405,9 +5430,14 @@ function fillElecSheet(ws, yyyy, mm) {
       const col = DAY_COL[dk];
       const day = wData[dk];
       if (!day) continue;
+      let hasElecData = false;
       for (const key in OFFSETS) {
-        setCell(ws, base + OFFSETS[key], col, day[key]);
+        const v = day[key];
+        if (v !== null && v !== undefined && v !== "") hasElecData = true;
+        setCell(ws, base + OFFSETS[key], col, v);
       }
+      // 項目③: 点検者氏名(base+33=R36系) に月単位測定者を書く（電気データのある実測日のみ）
+      if (inspName && hasElecData) setCell(ws, base + 33, col, inspName);
     }
   }
 }
