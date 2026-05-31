@@ -362,7 +362,7 @@ header h1 {
 }
 .equip-table {
   width: auto;
-  min-width: 472px;        /* 1列目92 + 日列76×5 = 472px。5列を画面内に収め横スクロール最小化 */
+  min-width: 412px;        /* UI-fix9: 1列目92 + 日列64×5 = 412px。電気/機械の全曜日列を画面内に収める */
   table-layout: fixed;
   border-collapse: collapse;
   background: #fff;
@@ -392,12 +392,12 @@ header h1 {
   z-index: 6;
 }
 .equip-table thead th:not(:first-child) {
-  width: 76px;
-  min-width: 76px;
+  width: 64px;            /* UI-fix9: 76→64。トグル48px+padding が収まる下限 */
+  min-width: 64px;
 }
 .equip-table tbody td:not(:first-child) {
-  width: 76px;
-  min-width: 76px;
+  width: 64px;            /* UI-fix9: 76→64 */
+  min-width: 64px;
 }
 .equip-table tbody td:first-child {
   position: sticky;
@@ -424,12 +424,12 @@ header h1 {
 .equip-table input[type="number"],
 .equip-table input[type="text"] {
   width: 100%;
-  min-width: 64px;         /* 76px列に収めつつ桁が切れない最小幅 */
-  height: 40px;
+  min-width: 56px;         /* UI-fix9: 64→56。64px列に収めつつ桁が切れない下限 */
+  height: 36px;            /* UI-fix9: 40→36 */
   padding: 4px 2px;        /* 左右余白を詰めて桁スペースを確保 */
   border: 1px solid #ccd;
   border-radius: 6px;
-  font-size: 13px;         /* 86px幅に8桁を収める */
+  font-size: 13px;         /* 8桁表示維持 */
   text-align: right;
   font-family: inherit;
   background: #fafbfc;
@@ -499,18 +499,18 @@ header h1 {
 }
 /* トグルボタン（○△×選択） */
 .toggle-btn {
-  min-width: 55px;
-  height: 44px;
+  min-width: 48px;         /* UI-fix9: 55→48（電気/機械の全曜日列を画面内に） */
+  height: 38px;            /* UI-fix9: 44→38 */
   border: 1px solid #ccd;
   border-radius: 6px;
   background: #fafbfc;
-  font-size: 16px;
+  font-size: 14px;         /* UI-fix9: 16→14 */
   font-weight: 700;
   cursor: pointer;
   font-family: inherit;
   color: #666;
-  padding: 0 4px;
-  line-height: 44px;
+  padding: 0 2px;          /* UI-fix9: 0 4px→0 2px */
+  line-height: 38px;       /* UI-fix9: 44→38（height と一致） */
   text-align: center;
 }
 .toggle-btn[data-val="○"] { background: #c8e6c9; color: #2e7d32; border-color: #a5d6a7; }
@@ -539,10 +539,10 @@ header h1 {
     padding: 8px 0;
   }
   .equip-table {
-    /* 1列目92 + 日列76×5 = 472px。基本定義と統一（発火時も同じ見た目） */
+    /* UI-fix9: 1列目92 + 日列64×5 = 412px。基本定義と統一（発火時も同じ見た目） */
     width: auto;
-    min-width: 472px;
-    table-layout: fixed;   /* 列幅を指定どおり固定（auto の均等化を防ぎ、76px を厳守） */
+    min-width: 412px;
+    table-layout: fixed;   /* 列幅を指定どおり固定（auto の均等化を防ぎ、64px を厳守） */
     border-radius: 0;
     box-shadow: none;
     /* overflow:visible は親の overflow-x:auto を殺すため指定しない（sticky は overflow:auto 下でも機能） */
@@ -565,12 +565,12 @@ header h1 {
     background: #eef5f1;
     z-index: 6;
   }
-  /* 2-6列目（月〜金）: 76px固定 */
+  /* 2-6列目（月〜金）: 64px固定（UI-fix9: 76→64・基本定義と統一） */
   .equip-table thead th:not(:first-child),
   .equip-table tbody td:not(:first-child) {
-    width: 76px;
-    min-width: 76px;
-    max-width: 76px;
+    width: 64px;
+    min-width: 64px;
+    max-width: 64px;
   }
   /* 1列目テキスト: 折り返し許可（省略しない） */
   .equip-table tbody td:first-child {
@@ -591,11 +591,11 @@ header h1 {
     left: 0;
     z-index: 3;
   }
-  /* 入力ボックス: 高さを少し拡大 */
+  /* 入力ボックス: 基本定義と統一（UI-fix9: height 40→36, font13） */
   .equip-table input[type="number"],
   .equip-table input[type="text"] {
-    height: 40px;
-    font-size: 13px;  /* 基本定義と統一（86px幅に8桁） */
+    height: 36px;
+    font-size: 13px;
   }
 }
 
