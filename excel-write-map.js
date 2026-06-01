@@ -8,8 +8,8 @@
  *  - MLDO 不含 (サーバー GAS 計算 + 直書き、クライアント責務外)
  *  - storage_unit='region' 不在 (kake には aeration/mlss_return 相当なし)
  *
- * entry 数: 29 (= ALL_FIELDS)
- *  - 24 daily (ITEM_OFFSETS と一致、日常水質シート書込)
+ * entry 数: 30 (= ALL_FIELDS) ※ chlorineDose 追加 (塩素投入量 R37、_daily(33))
+ *  - 25 daily (ITEM_OFFSETS と一致、日常水質シート書込)
  *  - 3 monthly (終沈 tempFinal/transFinal/phFinal、水質管理報告シート書込、null_skip=true)
  *  - 2 metadata (inspector/bikou、別経路書込、b2 では documentation only)
  *
@@ -93,6 +93,7 @@
     mlss:           _entry(_daily(30), null, false),
     sludgeLevel:    _entry(_daily(31), null, false),
     chlorine:       _entry(_daily(32), null, false),
+    chlorineDose:   _entry(_daily(33), null, false),
 
     // ----- 終沈 (3): 月一書込、Phase 23-B-1 null skip 適用 -----
     // FINAL_COLS = { tempFinal:5(E), phFinal:9(I), transFinal:12(L) } (fillReportFinalData 由来)

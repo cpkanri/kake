@@ -1351,6 +1351,11 @@ input[type="number"] {
       <span class="unit">mg/L</span>
       <input type="number" inputmode="decimal" step="0.1" data-field="chlorine">
     </div>
+    <div class="field">
+      <span class="label">塩素投入量</span>
+      <span class="unit">kg</span>
+      <input type="number" inputmode="decimal" step="0.1" data-field="chlorineDose">
+    </div>
   </div>
 
   <!-- セクション7: 測定者 → Phase 25-e で月単位欄(#monthInspector・最上部)へ移動・統合。
@@ -1671,7 +1676,7 @@ const ALL_FIELDS = [
   "transIn", "transOut",
   "phIn", "phDitch", "phOut",
   "sv10", "sv20", "sv30", "sv24h",
-  "mlss", "sludgeLevel", "chlorine",
+  "mlss", "sludgeLevel", "chlorine", "chlorineDose",
   "tempFinal", "transFinal", "phFinal",
   "inspector", "bikou"
 ];
@@ -1686,7 +1691,7 @@ const COPY_FIELDS = [
   "transIn", "transOut",
   "phIn", "phDitch", "phOut",
   "sv10", "sv20", "sv30", "sv24h",
-  "mlss", "sludgeLevel", "chlorine",
+  "mlss", "sludgeLevel", "chlorine", "chlorineDose",
   "tempFinal", "transFinal", "phFinal"
 ];
 
@@ -5120,7 +5125,7 @@ function fillWaterSheet(ws, yyyy, mm, holidaySet) {
   const NEXT_WEEK_COL = 14; // N列 = 次週の最初の平日
   // 加計テンプレ: 積算テーブル R4-R12（無効電力量 R6 / デマンド R7 が上殿より +2 行追加）
   // 測定テーブル R16-R36（測定者 R15 / 見出し R13-R14 / 備考 R38）
-  // 上殿のオフセットから一律 +2 ずれている。R37 はキー未定義のため空欄のまま。
+  // 上殿のオフセットから一律 +2 ずれている。R37(塩素投入量) を chlorineDose で定義（測定テーブル J:N）。
   const ITEM_OFFSETS = {
     power200v: 0, power100v: 1,           // R4 全日電力量, R5 力測電力量
     reactivePower: 2, demand: 3,           // R6 無効電力量, R7 デマンド
@@ -5130,7 +5135,7 @@ function fillWaterSheet(ws, yyyy, mm, holidaySet) {
     transIn: 18, transOut: 19,             // R22/R23 透視度
     phIn: 23, phDitch: 24, phOut: 25,      // R27/R28/R29 PH
     sv10: 26, sv20: 27, sv30: 28, sv24h: 29,          // R30-R33 SV
-    mlss: 30, sludgeLevel: 31, chlorine: 32           // R34/R35/R36 MLSS/汚泥界面/残留塩素
+    mlss: 30, sludgeLevel: 31, chlorine: 32, chlorineDose: 33   // R34/R35/R36/R37 MLSS/汚泥界面/残留塩素/塩素投入量
   };
   // 加計: 第1週データRow=4, dateRow=3, inspectorRow=15（各週+46オフセット）
   const DATA_ROW_BASE = 4;
@@ -5301,11 +5306,8 @@ function fillWaterSheet(ws, yyyy, mm, holidaySet) {
         ws.getCell(row, AVG_COL).value = { formula: 'IFERROR(AVERAGE(J' + row + ':N' + row + '),"")' };
       }
     }
-    // 項目②: 塩素投入量(R37, 測定テーブル所属 J:N) にも平均を付与（ITEM_OFFSETS 対象外のため個別）。
-    {
-      const r37 = 37 + offset;
-      ws.getCell(r37, AVG_COL).value = { formula: 'IFERROR(AVERAGE(J' + r37 + ':N' + r37 + '),"")' };
-    }
+    // 項目②: 塩素投入量(R37) は chlorineDose を ITEM_OFFSETS(33) へ定義したため、
+    // 上の測定テーブル平均ループ(else 分岐)が J:N 平均を自動付与する。個別ブロックは冗長につき撤去。
 
     // ===== 臭気「有無」セル(G24:H26 結合, マスター G24)を消す（腐敗臭ラベルは残す） =====
     ws.getCell(24 + offset, 7).value = null;
