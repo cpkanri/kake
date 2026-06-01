@@ -268,15 +268,19 @@ function computeMldoForMonth(month, recompute) {
       }
     }
 
+    // データ損失防止ガード: 当月のディッチ水温が0件なら recompute でもクリアしない（算出0件→空読み→消去 を回避）
+    var freshCount = Object.keys(tempMap).length;
+    var doRecompute = recompute && freshCount > 0;
+
     // MLDO ログシートを用意（month → mldo値のキャッシュ）
     var mldoLog = ss.getSheetByName('MLDOログ');
     if (!mldoLog) {
       mldoLog = ss.insertSheet('MLDOログ');
       mldoLog.getRange(1, 1, 1, 3).setValues([['月', '日付', 'MLDO値']]);
     }
-    // recompute: 当月の MLDOログ レコードを削除（下から）→ skip-existing を解除しフレッシュ算出させる
+    // recompute（かつ当月データ有）: 当月の MLDOログ レコードを削除（下から）→ skip-existing 解除しフレッシュ算出
     var clearedLogRows = 0;
-    if (recompute && mldoLog.getLastRow() > 1) {
+    if (doRecompute && mldoLog.getLastRow() > 1) {
       var allLog = mldoLog.getDataRange().getValues();
       for (var dli = allLog.length - 1; dli >= 1; dli--) {
         if (normalizeMonth(allLog[dli][0]) === month) { mldoLog.deleteRow(dli + 1); clearedLogRows++; }
@@ -326,8 +330,9 @@ function computeMldoForMonth(month, recompute) {
       var dataRowCount = 31;
       var mldoCol = 14; // N列
       var dateRange = reportSheet.getRange(dataRowStart, 1, dataRowCount, 1).getValues();
-      // recompute: 当月の N列セルを先にクリア（手動修正値含め当月自動値を差し替え）
-      if (recompute) {
+      // recompute（かつ当月データ有）: 当月の N列セルを先にクリア（手動修正値含め当月自動値を差し替え）
+      // ※ freshCount=0 のときはクリアしない（doRecompute=false）＝算出0件での消去によるデータ損失を防ぐ
+      if (doRecompute) {
         for (var rk = 0; rk < dataRowCount; rk++) {
           var rcStr = toDateStr(dateRange[rk][0]); // JST正規化
           if (rcStr && rcStr.slice(0, 7) === month) { reportSheet.getRange(dataRowStart + rk, mldoCol).clearContent(); clearedReportCells++; }
@@ -356,10 +361,22 @@ function computeMldoForMonth(month, recompute) {
       }
     }
 
+    var valuesCount = Object.keys(existingDates).length;
+    // エディタ直接実行では戻り値(ContentService.TextOutput)が "{}" としか表示されないため、
+    // 実行ログに要約を必ず残す（newlyComputed/values件数/異常検知をログで確認可能に）。
+    Logger.log('[computeMldo] month=' + month + ' recompute=' + recompute + ' doRecompute=' + doRecompute
+      + ' freshTempDays=' + freshCount + ' totalDates=' + dateKeys.length + ' newlyComputed=' + newRows.length
+      + ' clearedLogRows=' + clearedLogRows + ' clearedReportCells=' + clearedReportCells
+      + ' writtenToReport=' + writtenToReport + ' skippedLocked=' + skippedLocked
+      + ' valuesCount=' + valuesCount + ' anomalies=' + anomalies.length
+      + (recompute && freshCount === 0 ? ' [GUARD] 当月ディッチ水温0件のためクリア/算出スキップ(データ損失防止)' : ''));
     return jsonResponse({
       status: 'ok',
       month: month,
       recompute: recompute,
+      doRecompute: doRecompute,
+      noFreshData: (recompute && freshCount === 0),
+      freshTempDays: freshCount,
       clearedLogRows: clearedLogRows,
       clearedReportCells: clearedReportCells,
       totalDates: dateKeys.length,
@@ -367,13 +384,29 @@ function computeMldoForMonth(month, recompute) {
       writtenToReport: writtenToReport,
       skippedLocked: skippedLocked,
       anomalies: anomalies,
+      valuesCount: valuesCount,
       reportSheetFound: !!reportSheet,
       values: existingDates
     });
   } catch (err) {
+    Logger.log('[computeMldo ERROR] ' + (err && err.stack ? err.stack : err));
     return jsonResponse({error: err.message});
   }
 }
+
+// ===== MLDO 診断ランナー（エディタ実行用） =====
+// computeMldoForMonth は ContentService.TextOutput を返すため、エディタで直接実行すると
+// 戻り値が "{}" としか表示されない（中身は getContent() にある）。本関数は getContent() を
+// Logger.log し、パース済みのプレーンオブジェクトを返す（エディタの戻り値表示でも中身が見える）。
+//   使い方: debugMldo('2026-05', true) を ▶ 実行 → 実行ログに JSON 全文。
+function debugMldo(month, recompute) {
+  var out = computeMldoForMonth(month, recompute);
+  var content = out.getContent();
+  Logger.log('[debugMldo] ' + content);
+  return JSON.parse(content);
+}
+// 旧来の runMldoMay2026 互換（中身を debugMldo 経由でログ可視化）
+function runMldoMay2026() { return debugMldo('2026-05', true); }
 
 // ===== 祝日リスト =====
 
