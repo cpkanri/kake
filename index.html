@@ -4587,8 +4587,16 @@ function bindEvents() {
       if (data.error) throw new Error(data.error);
       // computeMldo の戻り値 values(日付→MLDO, 当月全日分・GASで0.01丸め済) を破棄せず永続保存。
       // Excelビルド時に fillReportMldo が読んで 水質管理報告 N列へ書く（SS非経由で出力に乗せる経路）。
+      // 保存前にキーを JST「YYYY-MM-DD」へ正規化し、ISO-UTCキー混在（−1ズレの根）を断つ。
       if (data.values && typeof data.values === 'object') {
-        try { safeSetItem('kake_mldo_' + weeklyData.targetMonth, JSON.stringify(data.values)); }
+        const cleanMldo = {};
+        Object.keys(data.values).forEach(function (k) {
+          const ymd = mldoKeyToYmdJst(k);
+          if (!ymd) return;
+          const ck = ymd.y + '-' + String(ymd.mo).padStart(2, '0') + '-' + String(ymd.d).padStart(2, '0');
+          cleanMldo[ck] = data.values[k];
+        });
+        try { safeSetItem('kake_mldo_' + weeklyData.targetMonth, JSON.stringify(cleanMldo)); }
         catch (e) { console.warn('MLDO値の保存に失敗:', e); }
       }
       let msg = "MLDO計算完了：新規 " + (data.newlyComputed || 0) + " 件";
@@ -5387,12 +5395,29 @@ function fillReportFinalData(wb, yyyy, mm) {
   }
 }
 
+// MLDO キャッシュの日付キーを「JST のカレンダー日」に正規化して {y, mo, d} を返す。
+// 対応: "YYYY-MM-DD" / "YYYY/M/D"（時刻なし＝そのまま採用）、
+//       ISO タイムスタンプ "YYYY-MM-DDTHH:MM:SS.sssZ"（UTC）→ +9h で JST 日に変換。
+// 背景: 旧 GAS が ISO-UTC キーを返した時期のキャッシュ（kake_mldo_<YYYY-MM>）が残っており、
+//   素朴な split では ISO の UTC日付部（JST 0時の前日）を拾って −1日ズレになる。JST 化で解消。
+function mldoKeyToYmdJst(key) {
+  if (key === null || key === undefined) return null;
+  const s = String(key).trim();
+  const m = s.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})$/); // 時刻なしの純日付はそのまま
+  if (m) return { y: +m[1], mo: +m[2], d: +m[3] };
+  const dt = new Date(s); // ISO 等
+  if (isNaN(dt.getTime())) return null;
+  const jst = new Date(dt.getTime() + 9 * 3600 * 1000); // UTC → JST(+9h)
+  return { y: jst.getUTCFullYear(), mo: jst.getUTCMonth() + 1, d: jst.getUTCDate() };
+}
+
 // ===== MLDO を 水質管理報告 N列(col14) R8-38 へ書込（出力Excelに乗せる経路） =====
 // MLDO は GAS computeMldo が算出し、ライブSS の N列/MLDOログ に書く（PWAダウンロードはSS非経由）。
 // computeMldo 成功時にクライアントが戻り値 values(日付→MLDO・当月全日分・GASで0.01丸め済) を
 // localStorage(kake_mldo_<YYYY-MM>) へ保存しておき、本関数がビルド時に読んで N列へ number 書込する。
 // 終沈 fillReportFinalData と同じく「該当日が無ければ空欄維持・クライアント側で再丸め/0埋めしない」。
 // 行対応: R8=1日 → row = 7 + 日（fillReportFinalData の r=7+date と同一規約）。
+// 日付キーは ISO 混在でも mldoKeyToYmdJst で JST 日へ正規化してから行を決める（−1ズレ防止）。
 function fillReportMldo(wb, yyyy, mm) {
   const ws = wb.getWorksheet("水質管理報告");
   if (!ws) return;
@@ -5405,17 +5430,15 @@ function fillReportMldo(wb, yyyy, mm) {
   if (!map || typeof map !== "object") return;
   const MLDO_COL = 14; // N列
   for (const key in map) {
-    // key: "YYYY-MM-DD"（GAS toDateStr 形式）。"/" 区切りも許容。
-    const parts = String(key).split(/[-/]/);
-    if (parts.length < 3) continue;
-    const ky = parseInt(parts[0], 10), km = parseInt(parts[1], 10), kd = parseInt(parts[2], 10);
-    if (ky !== yyyy || km !== mm) continue;          // 当月のみ
-    if (!(kd >= 1 && kd <= 31)) continue;
+    const ymd = mldoKeyToYmdJst(key); // clean/ISO いずれも JST 日へ正規化
+    if (!ymd) continue;
+    if (ymd.y !== yyyy || ymd.mo !== mm) continue;       // 当月のみ（正規化後の年月で判定）
+    if (!(ymd.d >= 1 && ymd.d <= 31)) continue;
     const v = map[key];
     if (v === null || v === undefined || v === "") continue; // 無データ日は空欄維持
     const num = Number(v);
     if (isNaN(num)) continue;
-    ws.getCell(7 + kd, MLDO_COL).value = num; // 再丸めせず GAS済の固定数値をそのまま
+    ws.getCell(7 + ymd.d, MLDO_COL).value = num; // 再丸めせず GAS済の固定数値をそのまま
   }
 }
 
