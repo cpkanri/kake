@@ -137,12 +137,28 @@ function normalizeMonth(v) {
 }
 
 // 日付をYYYY-MM-DD文字列に変換（Sheetで自動Date化を防ぐ用途）
+// 2026-06-01: MLDO −1日ズレ修正。あらゆる入力(Date / "YYYY-MM-DD" / ISO-UTCタイムスタンプ文字列)を
+//   JST(Asia/Tokyo)で一貫して「YYYY-MM-DD」に正規化する。
+//   旧実装は文字列を素通し(return String(v))していたため、JST 0時を UTC で表した ISO 文字列
+//   （例 "2026-05-06T15:00:00.000Z" = JST 5/7 0:00）が前日 "2026-05-06" のまま下流(MLDOキー)へ流れ、
+//   client fillReportMldo の日付パースで −1日ズレになっていた。
+//   ※ Date オブジェクト経路はスクリプトTZ=Asia/Tokyo のため従来と同一結果（回帰なし）。
 function toDateStr(v) {
   if (v === null || v === undefined || v === '') return '';
+  var d = null;
   if (v instanceof Date) {
-    return v.getFullYear() + '-' + ('0' + (v.getMonth() + 1)).slice(-2) + '-' + ('0' + v.getDate()).slice(-2);
+    d = v;
+  } else {
+    var s = String(v).trim();
+    // 既に純粋な日付文字列(YYYY-MM-DD / YYYY/M/D・時刻なし)はそのまま正規化（TZ往復を避ける）
+    var md = s.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})$/);
+    if (md) return md[1] + '-' + ('0' + md[2]).slice(-2) + '-' + ('0' + md[3]).slice(-2);
+    // ISOタイムスタンプ等 → Date化して JST で日付を取る
+    var parsed = new Date(s);
+    if (isNaN(parsed.getTime())) return s; // パース不能はそのまま
+    d = parsed;
   }
-  return String(v);
+  return Utilities.formatDate(d, 'Asia/Tokyo', 'yyyy-MM-dd');
 }
 
 function matchMonth(cellValue, month) {
@@ -153,10 +169,10 @@ function matchMonth(cellValue, month) {
 }
 
 // ===== MLDO 自動計算（加計・月1回固定書込） =====
-// 計算式: base = (530 - 水温 × 16) ÷ 100、範囲 ±0.50、精度 0.01
-// データソース: 日常水質シートの水温データ（ディッチ）
-// 書き込み先: 水質管理報告（2/2）G列（MLDO, Row49〜79 の該当日）
-// 月1回のみ実行し、既に値があるセルは上書きしない
+// 計算式: base = (530 - 水温 × 16) ÷ 100、±0.50乱数、0.01精度、0未満は0クランプ（負値厳禁）
+// データソース: 日常水質シートの水温データ（ディッチ）＝点検日のみ
+// 書き込み先: 水質管理報告 N列(14列目) Row8〜Row38 の該当日（A列日付一致）
+// 月1回のみ（recompute=false 時は skip-existing で既存値・手動修正値を保護）
 function calcMldoBase(waterTemp) {
   if (waterTemp === null || waterTemp === undefined || waterTemp === '' || isNaN(Number(waterTemp))) return null;
   var t = Number(waterTemp);
@@ -165,7 +181,14 @@ function calcMldoBase(waterTemp) {
   var variation = (Math.random() * 1.0 - 0.5);
   var v = base + variation;
   // 精度 0.01
-  return Math.round(v * 100) / 100;
+  var rounded = Math.round(v * 100) / 100;
+  // 2026-06-01: 0未満クランプ（MLDO は絶対に負にならない）。乱数−0.5 や高温入力で負になっても 0 に。
+  // 既定の floor は 0（Yamane 指定で正の最小値へ変更可）。
+  if (rounded < 0) {
+    Logger.log('[MLDO clamp] waterTemp=' + t + ' base=' + (Math.round(base * 100) / 100) + ' rounded=' + rounded + ' → 0');
+    return 0;
+  }
+  return rounded;
 }
 
 // 当月のMLDO計算状態をチェック（ボタンバッジ用）
@@ -217,21 +240,27 @@ function checkMldoStatus(month) {
   }
 }
 
-function computeMldoForMonth(month) {
+// recompute(既定 false): true のとき当月の MLDOログ レコードと SS報告 N列当月セルをクリアしてから
+//   全日分をフレッシュ算出（−1ズレ・負値などの旧データ差し替え用）。手動修正値も当月分は消える点に注意。
+//   recompute は Yamane が明示的に呼ぶ（?action=computeMldo&month=YYYY-MM&recompute=true）。
+function computeMldoForMonth(month, recompute) {
   if (!month) return jsonResponse({error:'月が指定されていません'});
+  month = normalizeMonth(month) || month; // "YYYY-M" 等を "YYYY-MM" に正規化
+  recompute = (recompute === true || recompute === 'true' || recompute === '1');
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var ws = ss.getSheetByName('日常水質');
     if (!ws || ws.getLastRow() <= 1) return jsonResponse({error:'日常水質シートにデータがありません'});
 
     // 日常水質から当月の水温ディッチ値を収集
+    // ※点検日ガード: ディッチ水温が実在する日のみ tempMap に入れる＝MLDOは点検日のみ算出・書込。
     var data = ws.getRange(2, 1, ws.getLastRow() - 1, 34).getValues();
     // 日付 → 水温ディッチ のマップ
     var tempMap = {};
     for (var i = 0; i < data.length; i++) {
       var row = data[i];
       if (!matchMonth(row[0], month)) continue;
-      var dateStr = toDateStr(row[3]);
+      var dateStr = toDateStr(row[3]); // JST正規化済「YYYY-MM-DD」
       if (!dateStr) continue;
       var tempDitch = row[FIELD_MAP.tempDitch - 1];
       if (tempDitch !== '' && tempDitch !== null && !isNaN(Number(tempDitch))) {
@@ -245,6 +274,14 @@ function computeMldoForMonth(month) {
       mldoLog = ss.insertSheet('MLDOログ');
       mldoLog.getRange(1, 1, 1, 3).setValues([['月', '日付', 'MLDO値']]);
     }
+    // recompute: 当月の MLDOログ レコードを削除（下から）→ skip-existing を解除しフレッシュ算出させる
+    var clearedLogRows = 0;
+    if (recompute && mldoLog.getLastRow() > 1) {
+      var allLog = mldoLog.getDataRange().getValues();
+      for (var dli = allLog.length - 1; dli >= 1; dli--) {
+        if (normalizeMonth(allLog[dli][0]) === month) { mldoLog.deleteRow(dli + 1); clearedLogRows++; }
+      }
+    }
     var logData = mldoLog.getDataRange().getValues();
     // 既存の当月レコードを取得
     var existingDates = {};
@@ -256,12 +293,20 @@ function computeMldoForMonth(month) {
 
     // 月内の各日付について未登録なら計算して記録
     var newRows = [];
+    var anomalies = []; // 負値要因（高温入力の疑い）を後追い確認用に収集
     var dateKeys = Object.keys(tempMap).sort();
     for (var j = 0; j < dateKeys.length; j++) {
       var dk = dateKeys[j];
       if (dk in existingDates) continue; // 既に固定値あり
-      var mldo = calcMldoBase(tempMap[dk]);
+      var t = tempMap[dk];
+      var mldo = calcMldoBase(t);
       if (mldo === null) continue;
+      // base=(530-16t)/100。base<0（t>33.125℃）は非現実的な高温入力＝負値要因の疑い → ログ＋報告。
+      var base = (530 - Number(t) * 16) / 100;
+      if (base < 0) {
+        anomalies.push({ date: dk, waterTemp: t, base: Math.round(base * 100) / 100 });
+        Logger.log('[MLDO anomaly] ' + dk + ' waterTemp=' + t + '℃ base=' + (Math.round(base * 100) / 100) + ' → 0クランプ(高温入力の疑い・25-d-③要確認)');
+      }
       newRows.push([month, dk, mldo]);
       existingDates[dk] = mldo;
     }
@@ -275,25 +320,26 @@ function computeMldoForMonth(month) {
     var reportSheet = ss.getSheetByName('水質管理報告');
     var writtenToReport = 0;
     var skippedLocked = 0;
+    var clearedReportCells = 0;
     if (reportSheet) {
       var dataRowStart = 8;
       var dataRowCount = 31;
       var mldoCol = 14; // N列
       var dateRange = reportSheet.getRange(dataRowStart, 1, dataRowCount, 1).getValues();
+      // recompute: 当月の N列セルを先にクリア（手動修正値含め当月自動値を差し替え）
+      if (recompute) {
+        for (var rk = 0; rk < dataRowCount; rk++) {
+          var rcStr = toDateStr(dateRange[rk][0]); // JST正規化
+          if (rcStr && rcStr.slice(0, 7) === month) { reportSheet.getRange(dataRowStart + rk, mldoCol).clearContent(); clearedReportCells++; }
+        }
+      }
       var formulaRange = reportSheet.getRange(dataRowStart, mldoCol, dataRowCount, 1).getFormulas();
       var valueRange = reportSheet.getRange(dataRowStart, mldoCol, dataRowCount, 1).getValues();
       for (var k = 0; k < dataRowCount; k++) {
         var cellDate = dateRange[k][0];
         if (!cellDate) continue;
-        var cellDateStr = '';
-        if (cellDate instanceof Date) {
-          cellDateStr = toDateStr(cellDate);
-        } else if (typeof cellDate === 'string' && cellDate.length > 0) {
-          // 文字列形式の日付（例: "2026-04-01" や "2026/4/1"）も対応
-          var parsed = new Date(cellDate);
-          if (!isNaN(parsed.getTime())) cellDateStr = toDateStr(parsed);
-          else cellDateStr = String(cellDate);
-        }
+        // toDateStr が Date / 文字列 / ISO を JST「YYYY-MM-DD」へ一貫正規化（日付一致の −1ズレ防止）
+        var cellDateStr = toDateStr(cellDate);
         if (!cellDateStr || !(cellDateStr in existingDates)) continue;
 
         var hasFormula = formulaRange[k][0] && formulaRange[k][0].toString().indexOf('=') === 0;
@@ -313,10 +359,14 @@ function computeMldoForMonth(month) {
     return jsonResponse({
       status: 'ok',
       month: month,
+      recompute: recompute,
+      clearedLogRows: clearedLogRows,
+      clearedReportCells: clearedReportCells,
       totalDates: dateKeys.length,
       newlyComputed: newRows.length,
       writtenToReport: writtenToReport,
       skippedLocked: skippedLocked,
+      anomalies: anomalies,
       reportSheetFound: !!reportSheet,
       values: existingDates
     });
@@ -664,7 +714,7 @@ function doGet(e) {
     if (a==='getData') return getData(e.parameter.month);
     if (a==='getAllData') return getAllData(e.parameter.month);
     if (a==='exportExcel') return exportExcel(e.parameter.month,e.parameter.templateId);
-    if (a==='computeMldo') return computeMldoForMonth(e.parameter.month);
+    if (a==='computeMldo') return computeMldoForMonth(e.parameter.month, e.parameter.recompute);
     if (a==='checkMldo') return checkMldoStatus(e.parameter.month);
     if (a==='getHolidays') return getHolidays();
     return jsonResponse({error:'不明なアクション'});
