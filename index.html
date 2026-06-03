@@ -4782,13 +4782,19 @@ function writeElecEmptyCell(ws, row, col, date) {
   cell.numFmt = "@";
 }
 
-function setCell(ws, row, col, val) {
+function setCell(ws, row, col, val, preserveTypedDecimals) {
   if (val === null || val === undefined || val === "") return;
   const cell = ws.getCell(row, col);
   if (typeof val === "number") { cell.value = val; return; }
-  const num = Number(val);
-  if (!isNaN(num) && typeof val === "string" && val.trim() !== "" && /^-?\d+(\.\d+)?$/.test(val.trim())) {
-    cell.value = num;
+  const s = String(val).trim();
+  const num = Number(s);
+  if (!isNaN(num) && s !== "" && /^-?\d+(\.\d+)?$/.test(s)) {
+    cell.value = num; // 数値型のまま（テンプレ集計式・按分を壊さない）
+    if (preserveTypedDecimals) {
+      const dot = s.indexOf(".");
+      const dec = dot >= 0 ? (s.length - dot - 1) : 0;
+      if (dec > 0) cell.numFmt = "0." + "0".repeat(dec); // 入力小数桁ぶんだけ表示（四捨五入なし、整数は触らない）
+    }
   } else {
     cell.value = formatHyphenForOutput(val);
   }
@@ -5947,7 +5953,7 @@ function fillMechSheet(ws, yyyy, mm) {
         if (val1 === null || val1 === undefined || val1 === "") {
           writeMechEmptyCell(ws, row1, col, key, val1, actual);
         } else {
-          setCell(ws, row1, col, val1);
+          setCell(ws, row1, col, val1, true);
         }
       }
       // 2/2 ページ: 絶対行(週1基準) + (wk.p2 - 66) で各週の page2 ブロックへ
@@ -5957,7 +5963,7 @@ function fillMechSheet(ws, yyyy, mm) {
         if (val2 === null || val2 === undefined || val2 === "") {
           writeMechEmptyCell(ws, row2, col, key, val2, actual);
         } else {
-          setCell(ws, row2, col, val2);
+          setCell(ws, row2, col, val2, true);
         }
       }
       // 点検者(測定者名): 実測日列のみ。点検者行は page1=wk.p1+2(C2系) / page2=wk.p2+2(C68系)、
