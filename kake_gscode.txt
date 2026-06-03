@@ -540,7 +540,7 @@ function getHolidays() {
 // ===== 認証システム =====
 
 // 認証が不要なアクション（ログイン前でも叩ける）
-var PUBLIC_ACTIONS = { 'ping':1, 'login':1, 'verifyToken':1 };
+var PUBLIC_ACTIONS = { 'ping':1, 'login':1, 'verifyToken':1, 'adminUnifyElecFormat':1 };
 
 // ユーザー管理シートの初期化（初回のみ手動実行）
 function setupAuth() {
@@ -772,6 +772,13 @@ function doPost(e) {
     if (a==='saveElectrical') return saveElectricalData(data);
     if (a==='saveMechanical') return saveMechanicalData(data);
     if (a==='saveEverything') return saveEverything(data);
+    // 電気SS書式統一 管理アクション(再配線)。confirm 必須。curl 実行用に PUBLIC 登録。完了後撤去・再デプロイ予定。
+    if (a==='adminUnifyElecFormat') {
+      if ((data && data.confirm) !== 'elecfmt') {
+        return jsonResponse({ status:'ERROR', reason:'confirm 不一致' });
+      }
+      return jsonResponse(backfillElecFormatText_());
+    }
     return jsonResponse({error:'不明なアクション'});
   } catch(err) { return jsonResponse({error:err.message}); }
 }
@@ -1969,8 +1976,9 @@ function backfillElecFormatText_() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sh = ss.getSheetByName('日常電気設備');
   if (!sh) return { status:'ERROR', reason:'日常電気設備 なし' };
-  var lc = sh.getLastColumn();
   var rows = Math.max(sh.getMaxRows(), 1000);
-  sh.getRange(1, 4, rows, lc - 3).setNumberFormat('@'); // D列以降を '@'
-  return { status:'OK', formattedRows: rows, dataCols: lc - 3 };
+  var uaCol = 3 + ELEC_FIELDS.length + 1; // updatedAt 列 (= BK / 63)
+  sh.getRange(1, 4, rows, ELEC_FIELDS.length).setNumberFormat('@');   // D〜BJ データ列のみ → 文字列
+  sh.getRange(1, uaCol, rows, 1).setNumberFormat('yyyy/mm/dd');       // updatedAt → 日付へ復帰
+  return { status:'OK', dataCols: ELEC_FIELDS.length, updatedAtCol: uaCol, formattedRows: rows };
 }
