@@ -3623,6 +3623,20 @@ const EQUIP_NAME_TO_KEY = {
   "脱臭ファン": "deodorFanHr"
 };
 
+// 2026-06-03: サーバ機器名(全角№・スペース無)を EQUIP_LABELS から自動補完。
+// No.系の同期データが画面に載らない不具合(全角№ vs 半角No.の表記ゆれ)を解消。
+EQUIP_LABELS.forEach(function (lbl, i) {
+  if (lbl && EQUIP_KEYS[i]) EQUIP_NAME_TO_KEY[lbl] = EQUIP_KEYS[i];
+});
+// 表記ゆれ(スペース除去・№↔No.統一)フォールバック
+function _normEquipName(s) {
+  return String(s == null ? '' : s).replace(/\s+/g, '').replace(/№/g, 'No.');
+}
+var EQUIP_NAME_TO_KEY_NORM = {};
+Object.keys(EQUIP_NAME_TO_KEY).forEach(function (k) {
+  EQUIP_NAME_TO_KEY_NORM[_normEquipName(k)] = EQUIP_NAME_TO_KEY[k];
+});
+
 // 曜日: 日本語→コード変換マップ
 const DAY_JP_TO_CODE = { "月": "mon", "火": "tue", "水": "wed", "木": "thu", "金": "fri" };
 
@@ -3764,7 +3778,7 @@ function mergeServerData(serverData, expectedMonth) {
       if (wData && typeof wData === "object") {
         let weekMerged = false;
         Object.keys(wData).forEach(nameOrKey => {
-          const key = EQUIP_NAME_TO_KEY[nameOrKey] || nameOrKey;
+          const key = EQUIP_NAME_TO_KEY[nameOrKey] || EQUIP_NAME_TO_KEY_NORM[_normEquipName(nameOrKey)] || nameOrKey;
           if (weeklyData.equipment[w][key]) {
             const dayData = wData[nameOrKey];
             if (dayData && typeof dayData === "object") {
