@@ -540,7 +540,7 @@ function getHolidays() {
 // ===== 認証システム =====
 
 // 認証が不要なアクション（ログイン前でも叩ける）
-var PUBLIC_ACTIONS = { 'ping':1, 'login':1, 'verifyToken':1, 'adminCleanupFlatResidue':1 };
+var PUBLIC_ACTIONS = { 'ping':1, 'login':1, 'verifyToken':1 };
 
 // ユーザー管理シートの初期化（初回のみ手動実行）
 function setupAuth() {
@@ -772,14 +772,6 @@ function doPost(e) {
     if (a==='saveElectrical') return saveElectricalData(data);
     if (a==='saveMechanical') return saveMechanicalData(data);
     if (a==='saveEverything') return saveEverything(data);
-    // フラットタブ残骸クリーンアップ 管理アクション。confirm 必須・real:true で本実行。curl 実行用に PUBLIC 登録。完了後撤去予定。
-    if (a==='adminCleanupFlatResidue') {
-      if ((data && data.confirm) !== 'cleanup39b') {
-        return jsonResponse({ status:'ERROR', reason:'confirm 不一致' });
-      }
-      var dry = !(data && data.real === true); // real:true で本実行、無ければ dryRun
-      return jsonResponse(cleanupFlatResidue_(dry));
-    }
     return jsonResponse({error:'不明なアクション'});
   } catch(err) { return jsonResponse({error:err.message}); }
 }
