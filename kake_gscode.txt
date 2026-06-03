@@ -540,7 +540,7 @@ function getHolidays() {
 // ===== 認証システム =====
 
 // 認証が不要なアクション（ログイン前でも叩ける）
-var PUBLIC_ACTIONS = { 'ping':1, 'login':1, 'verifyToken':1, 'adminUnifyElecFormat':1 };
+var PUBLIC_ACTIONS = { 'ping':1, 'login':1, 'verifyToken':1 };
 
 // ユーザー管理シートの初期化（初回のみ手動実行）
 function setupAuth() {
@@ -772,13 +772,6 @@ function doPost(e) {
     if (a==='saveElectrical') return saveElectricalData(data);
     if (a==='saveMechanical') return saveMechanicalData(data);
     if (a==='saveEverything') return saveEverything(data);
-    // 電気SS書式統一 管理アクション(再配線)。confirm 必須。curl 実行用に PUBLIC 登録。完了後撤去・再デプロイ予定。
-    if (a==='adminUnifyElecFormat') {
-      if ((data && data.confirm) !== 'elecfmt') {
-        return jsonResponse({ status:'ERROR', reason:'confirm 不一致' });
-      }
-      return jsonResponse(backfillElecFormatText_());
-    }
     return jsonResponse({error:'不明なアクション'});
   } catch(err) { return jsonResponse({error:err.message}); }
 }
