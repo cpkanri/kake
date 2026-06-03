@@ -27,7 +27,6 @@ var ITEM_OFFSETS = {
   mlss: 28, sludgeLevel: 29, chlorine: 30,
 };
 var DAY_COLUMNS = { mon: 10, tue: 11, wed: 12, thu: 13, fri: 14 };
-var ELEC_FIELDS = ['voltage1p','mode1p','switch1p','power1p','voltage3p','mode3p','switch3p','power3p','pumpWellLook','pumpWellStatus','pumpWellReading','flowLook','flowStatus','flowReading','uvLook','uvStatus','uvValue','codValue','tnLook','tnStatus','tnReading','tpReading','pressureLook','pressureStatus','pressureReading','generatorLook','engineLook','fuelTankLook','fuelRemain','generatorHours','alarmStatus'];
 // 加計浄化センター 21項目
 var EQUIP_NAMES = ['thickScraperHr','thickPump1Hr','thickPump2Hr','sludgeMixerHr','thickAerationBlowerHr','returnWaterPump1Hr','returnWaterPump2Hr','drainPump1Hr','drainPump2Hr','aerationBlower1Hr','aerationBlower2Hr','mainPump1Hr','mainPump2Hr','aeration11Hr','aeration12Hr','finalScraperHr','returnPump11Hr','returnPump12Hr','excessPumpHr','deodorFanHr','screenUnitHr'];
 var EQUIP_LABELS = ['濃縮汚泥掻寄機','№１濃縮汚泥ポンプ','№２濃縮汚泥ポンプ','濃縮汚泥攪拌機','濃縮汚泥曝気ブロワ','№１返流水ポンプ','№２返流水ポンプ','№１床排水ポンプ','№２床排水ポンプ','№１曝気ブロワ','№2曝気ブロワ','№１主ポンプ','№２主ポンプ','№１-１エアレーション装置','№１-２エアレーション装置','№１終沈汚泥掻寄機','№１-１返送汚泥ポンプ','№１-２返送汚泥ポンプ','№１余剰汚泥ポンプ','脱臭ファン','スクリーンユニット'];
@@ -60,6 +59,11 @@ var ELEC_OFFSETS = {
   generatorLook:64, fuelTankLook:65, fuelRemain:66,
   alarmStatus:67
 };
+
+// ELEC_FIELDS は ELEC_OFFSETS を単一情報源として導出 (index.html ELEC_SECTIONS と整合維持)。
+// *Total (returnFlowTotal/excessFlowTotal/outFlowTotal) は Excel出力専用(日常水質から自動充填)のため
+// 保存スキーマからは除外する。結果 59 項目。
+var ELEC_FIELDS = Object.keys(ELEC_OFFSETS).filter(function(k){ return !/Total$/.test(k); });
 
 // 機械設備Excel位置マッピング
 // データ列: G=7(月), I=9(火), K=11(水), M=13(木) ※金曜はExcelにない可能性あり
@@ -925,7 +929,7 @@ function getAllData(month) {
     for(var i=0;i<v.length;i++){if(matchMonth(v[i][0],month)){result.equipment.push({week:v[i][1],name:v[i][2],mon:v[i][3],tue:v[i][4],wed:v[i][5],thu:v[i][6],fri:v[i][7]});}}}
   // Phase 25-c-α 補追 3 (2026-05-27): Phase 39-B-1 で SS タブ rename 取り残し修正 (電気設備 → 日常電気設備)
   var els=ss.getSheetByName('日常電気設備');
-  if(els&&els.getLastRow()>1){var v=els.getRange(2,1,els.getLastRow()-1,34).getValues();
+  if(els&&els.getLastRow()>1){var v=els.getRange(2,1,els.getLastRow()-1,3+ELEC_FIELDS.length).getValues();
     for(var i=0;i<v.length;i++){if(matchMonth(v[i][0],month)){var r={week:v[i][1],day:v[i][2]};
       for(var f=0;f<ELEC_FIELDS.length;f++){var val=v[i][f+3];r[ELEC_FIELDS[f]]=(val===''||val===null)?null:val;} result.electrical.push(r);}}}
   // Phase 25-c-α 補追 3 (2026-05-27): Phase 39-B-1 で SS タブ rename 取り残し修正 (機械設備 → 日常機械設備)
@@ -1817,3 +1821,91 @@ function correctWater_phase25d3(opts) {
 function runRealCorrectWater_phase25d3() {
   return correctWater_phase25d3({ dryRun: false });
 }
+
+// ============================================================================
+// Phase 39-B-3b: 日常電気設備 ELEC_FIELDS 再同期に伴う列再構築 (2026-06-03)
+// 旧フラットタブ(35列/旧ELEC_FIELDS)を、key名ベースで新ELEC_FIELDS(59項目/63列)へ remap。
+// 一致キーの値は保全、新規キーは空欄。col A は 'YYYY-MM' 文字列へ正規化維持。
+// dryRun デフォルト true。idempotent (再実行で _新 を作り直す)。
+// 本実行後は既存 swapElec_Phase39B3() で swap。
+// ============================================================================
+function migrateElecResync_Phase39B3b(dryRun) {
+  if (dryRun === undefined) dryRun = true;
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var src = ss.getSheetByName('日常電気設備');
+  if (!src) throw new Error('日常電気設備 が見つかりません');
+
+  var NEW_COLCOUNT = 3 + ELEC_FIELDS.length + 1; // 月週曜日(3) + 59 + updatedAt(1) = 63
+  var newHeader = ['月','週','曜日'].concat(ELEC_FIELDS).concat(['updatedAt']);
+
+  var srcLastRow = src.getLastRow();
+  var srcLastCol = src.getLastColumn();
+  if (srcLastRow < 1) throw new Error('日常電気設備 が空');
+  var srcAll = src.getRange(1,1,srcLastRow,srcLastCol).getValues();
+  var oldHeader = srcAll[0];
+  var oldIdx = {}; // header名 -> 0-based 列index
+  for (var c=0;c<oldHeader.length;c++){ var h=String(oldHeader[c]).trim(); if(h) oldIdx[h]=c; }
+
+  function monthKey(v){
+    if (v instanceof Date) return Utilities.formatDate(v,'JST','yyyy-MM');
+    if (typeof v==='string' && /^\d{4}-\d{2}/.test(v.trim())) return v.trim().slice(0,7);
+    return null;
+  }
+  var colMonth = (oldIdx['月']!=null)?oldIdx['月']:0;
+  var colWeek  = (oldIdx['週']!=null)?oldIdx['週']:1;
+  var colDow   = (oldIdx['曜日']!=null)?oldIdx['曜日']:2;
+
+  var rows = [];
+  for (var i=1;i<srcAll.length;i++){
+    var sr = srcAll[i];
+    var mk = monthKey(sr[colMonth]);
+    if (!mk) continue;
+    var nr = [];
+    for (var z=0;z<NEW_COLCOUNT;z++) nr.push('');
+    nr[0] = mk;
+    var wkRaw = sr[colWeek];
+    nr[1] = (typeof wkRaw==='number') ? Math.round(wkRaw) : (parseInt(wkRaw,10) || wkRaw);
+    nr[2] = sr[colDow];
+    for (var f=0; f<ELEC_FIELDS.length; f++){
+      var key = ELEC_FIELDS[f];
+      if (oldIdx[key] != null){
+        var v = sr[oldIdx[key]];
+        nr[3+f] = (v===''||v===null||v===undefined) ? '' : v;
+      }
+    }
+    nr[NEW_COLCOUNT-1] = (oldIdx['updatedAt']!=null) ? sr[oldIdx['updatedAt']] : new Date();
+    rows.push(nr);
+  }
+
+  var DOW={'月':1,'火':2,'水':3,'木':4,'金':5,'土':6,'日':7};
+  rows.sort(function(a,b){
+    if(a[0]!==b[0]) return a[0]<b[0]?-1:1;
+    if(a[1]!==b[1]) return a[1]-b[1];
+    return (DOW[a[2]]||99)-(DOW[b[2]]||99);
+  });
+
+  var matched=[],added=[];
+  ELEC_FIELDS.forEach(function(k){ (oldIdx[k]!=null?matched:added).push(k); });
+  var summary={ newColCount:NEW_COLCOUNT, migrated:rows.length,
+                preservedKeys:matched.length, newBlankKeys:added.length };
+  Logger.log('===== migrateElecResync_Phase39B3b (dryRun='+dryRun+') =====');
+  Logger.log('新列数='+NEW_COLCOUNT+' (期待63) / 行='+rows.length+' (期待49前後)');
+  Logger.log('保全キー('+matched.length+'): '+JSON.stringify(matched));
+  Logger.log('新規空欄キー('+added.length+'): '+JSON.stringify(added));
+  Logger.log('先頭: '+JSON.stringify(rows[0]?rows[0].slice(0,3):null)+
+             ' / 末尾: '+JSON.stringify(rows.length?rows[rows.length-1].slice(0,3):null));
+
+  if (dryRun){ summary.dryRun=true; return summary; }
+
+  var dstName='日常電気設備_新';
+  var ex=ss.getSheetByName(dstName); if(ex) ss.deleteSheet(ex);
+  var dst=ss.insertSheet(dstName);
+  dst.getRange(1,1,1,NEW_COLCOUNT).setValues([newHeader]);
+  dst.setFrozenRows(1);
+  dst.getRange(1,1,dst.getMaxRows(),1).setNumberFormat('@'); // A列文字列固定(Date自動変換罠の再発防止)
+  if(rows.length>0) dst.getRange(2,1,rows.length,NEW_COLCOUNT).setValues(rows);
+  summary.dryRun=false; summary.dst=dstName;
+  Logger.log('→ '+dstName+' に '+rows.length+' 行書込完了 (要 swapElec_Phase39B3)');
+  return summary;
+}
+function runRealMigrateElecResync_Phase39B3b(){ return migrateElecResync_Phase39B3b(false); }
