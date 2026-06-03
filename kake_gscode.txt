@@ -540,7 +540,7 @@ function getHolidays() {
 // ===== 認証システム =====
 
 // 認証が不要なアクション（ログイン前でも叩ける）
-var PUBLIC_ACTIONS = { 'ping':1, 'login':1, 'verifyToken':1 };
+var PUBLIC_ACTIONS = { 'ping':1, 'login':1, 'verifyToken':1, 'adminElecResyncFull':1 };
 
 // ユーザー管理シートの初期化（初回のみ手動実行）
 function setupAuth() {
@@ -772,6 +772,15 @@ function doPost(e) {
     if (a==='saveElectrical') return saveElectricalData(data);
     if (a==='saveMechanical') return saveMechanicalData(data);
     if (a==='saveEverything') return saveEverything(data);
+    // 一回限りの管理アクション (Phase 39-B-3b 移行)。confirm 必須 + 63列skipガードで誤爆防止。
+    // clasp run 未設定のため curl から実行可能にする目的で PUBLIC_ACTIONS に登録(confirmが実質secret)。
+    // 移行完了後は §7 に従いこの配線と PUBLIC 登録を撤去して再push予定。
+    if (a==='adminElecResyncFull') {
+      if ((data && data.confirm) !== '39B3b') {
+        return jsonResponse({ status:'ERROR', reason:'confirm が一致しません' });
+      }
+      return jsonResponse(adminElecResyncWithVerify_Phase39B3b());
+    }
     return jsonResponse({error:'不明なアクション'});
   } catch(err) { return jsonResponse({error:err.message}); }
 }
@@ -1909,3 +1918,52 @@ function migrateElecResync_Phase39B3b(dryRun) {
   return summary;
 }
 function runRealMigrateElecResync_Phase39B3b(){ return migrateElecResync_Phase39B3b(false); }
+
+// Phase 39-B-3b: 自動実行ラッパ (dryRun自己検証 → 本実行 → swap を1呼出で完結)
+// 安全機構: (a) 既に63列化済なら skip  (b) dryRun の列数/件数が想定外なら ABORT(本実行に進まない)
+function runElecResyncFull_Phase39B3b() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var EXPECT_COLS = 3 + ELEC_FIELDS.length + 1; // 63
+  var cur = ss.getSheetByName('日常電気設備');
+  if (cur && cur.getLastColumn() >= EXPECT_COLS) {
+    return { status:'SKIP', reason:'既に'+EXPECT_COLS+'列化済(再実行防止)', cols: cur.getLastColumn() };
+  }
+  var dry = migrateElecResync_Phase39B3b(true);
+  var ok = (dry.newColCount === EXPECT_COLS &&
+            dry.preservedKeys === 18 &&
+            dry.newBlankKeys === 41 &&
+            dry.migrated > 0 && dry.migrated < 200);
+  if (!ok) {
+    return { status:'ABORT', reason:'dryRun自己検証に不一致(本実行せず)', dryRun:dry };
+  }
+  var real = migrateElecResync_Phase39B3b(false);
+  var swap = swapElec_Phase39B3();
+  return { status:'OK', dryRun:dry, real:real, swap:swap };
+}
+
+// Phase 39-B-3b: 移行 + 読み戻し検証を1呼出で。doPost('adminElecResyncFull') から使用。
+// swap後の '日常電気設備' ヘッダ/サンプル行を付与し、getAllData を公開せずに §5 相当のHTTP検証を可能にする。
+function adminElecResyncWithVerify_Phase39B3b() {
+  var result = runElecResyncFull_Phase39B3b();
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sh = ss.getSheetByName('日常電気設備');
+    if (sh) {
+      var lc = sh.getLastColumn();
+      var header = sh.getRange(1,1,1,lc).getValues()[0];
+      var sampleRow = (sh.getLastRow() > 1) ? sh.getRange(2,1,1,lc).getValues()[0] : [];
+      // 従来 drop していた代表キー & 一致保全キーの存在を抽出
+      var probe = ['voltage','powerFactor','current','voltage210','ctrlPanel1Read','cap1',
+                   'pumpWellReading','codValue'];
+      var hidx = {}; for (var c=0;c<header.length;c++){ hidx[String(header[c]).trim()] = c; }
+      var probeResult = {};
+      probe.forEach(function(k){
+        probeResult[k] = (hidx[k] != null)
+          ? { colExists:true, sample:(sampleRow.length? sampleRow[hidx[k]] : null) }
+          : { colExists:false };
+      });
+      result.verify = { cols: lc, headerCount: header.length, probe: probeResult };
+    }
+  } catch(e) { result.verifyError = e.message; }
+  return result;
+}
