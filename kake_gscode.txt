@@ -540,7 +540,7 @@ function getHolidays() {
 // ===== 認証システム =====
 
 // 認証が不要なアクション（ログイン前でも叩ける）
-var PUBLIC_ACTIONS = { 'ping':1, 'login':1, 'verifyToken':1, 'adminElecResyncFull':1 };
+var PUBLIC_ACTIONS = { 'ping':1, 'login':1, 'verifyToken':1 };
 
 // ユーザー管理シートの初期化（初回のみ手動実行）
 function setupAuth() {
@@ -772,15 +772,6 @@ function doPost(e) {
     if (a==='saveElectrical') return saveElectricalData(data);
     if (a==='saveMechanical') return saveMechanicalData(data);
     if (a==='saveEverything') return saveEverything(data);
-    // 一回限りの管理アクション (Phase 39-B-3b 移行)。confirm 必須 + 63列skipガードで誤爆防止。
-    // clasp run 未設定のため curl から実行可能にする目的で PUBLIC_ACTIONS に登録(confirmが実質secret)。
-    // 移行完了後は §7 に従いこの配線と PUBLIC 登録を撤去して再push予定。
-    if (a==='adminElecResyncFull') {
-      if ((data && data.confirm) !== '39B3b') {
-        return jsonResponse({ status:'ERROR', reason:'confirm が一致しません' });
-      }
-      return jsonResponse(adminElecResyncWithVerify_Phase39B3b());
-    }
     return jsonResponse({error:'不明なアクション'});
   } catch(err) { return jsonResponse({error:err.message}); }
 }
