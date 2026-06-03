@@ -540,7 +540,7 @@ function getHolidays() {
 // ===== 認証システム =====
 
 // 認証が不要なアクション（ログイン前でも叩ける）
-var PUBLIC_ACTIONS = { 'ping':1, 'login':1, 'verifyToken':1 };
+var PUBLIC_ACTIONS = { 'ping':1, 'login':1, 'verifyToken':1, 'adminCompactMech':1 };
 
 // ユーザー管理シートの初期化（初回のみ手動実行）
 function setupAuth() {
@@ -772,6 +772,14 @@ function doPost(e) {
     if (a==='saveElectrical') return saveElectricalData(data);
     if (a==='saveMechanical') return saveMechanicalData(data);
     if (a==='saveEverything') return saveEverything(data);
+    // 日常機械設備 行コンパクション 管理アクション。confirm 必須・real:true で本実行。curl 実行用 PUBLIC。完了後撤去予定。
+    if (a==='adminCompactMech') {
+      if ((data && data.confirm) !== 'compactmech') {
+        return jsonResponse({ status:'ERROR', reason:'confirm 不一致' });
+      }
+      var dry = !(data && data.real === true);
+      return jsonResponse(compactMechSheet_(dry));
+    }
     return jsonResponse({error:'不明なアクション'});
   } catch(err) { return jsonResponse({error:err.message}); }
 }
@@ -2033,4 +2041,72 @@ function cleanupFlatResidue_(dryRun) {
     report.push(entry);
   }
   return { status: 'OK', dryRun: dryRun, report: report };
+}
+
+// 日常機械設備 フラット行コンパクション (2026-06-03)
+// 散らばった A列付き行を 月→週→曜日 で行2から詰め直す。重複は D優先→updatedAt最新で1本化。
+// A〜E(5列)のみ対象。dryRun 既定 true。idempotent。
+function compactMechSheet_(dryRun) {
+  if (dryRun === undefined) dryRun = true;
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName('日常機械設備');
+  if (!sh) return { status:'ERROR', reason:'日常機械設備 なし' };
+  var lastRow = sh.getLastRow();
+  if (lastRow < 2) return { status:'SKIP', reason:'データなし' };
+  var COLS = 5; // A月 B週 C曜日 D データJSON E updatedAt
+  var data = sh.getRange(2, 1, lastRow - 1, COLS).getValues();
+
+  function monthKey(v){
+    if (v instanceof Date) return Utilities.formatDate(v, 'JST', 'yyyy-MM');
+    if (typeof v === 'string' && /^\d{4}-\d{2}/.test(v.trim())) return v.trim().slice(0, 7);
+    return null;
+  }
+  function hasD(v){ return v !== '' && v !== null && v !== undefined; }
+  function uaTime(v){ return (v instanceof Date) ? v.getTime() : Date.parse(v); }
+  var DOW = { '月':1,'火':2,'水':3,'木':4,'金':5,'土':6,'日':7 };
+
+  var byKey = {}, scanned = 0, dupCount = 0;
+  for (var i = 0; i < data.length; i++) {
+    var mk = monthKey(data[i][0]);
+    if (!mk) continue;            // A(月)空 = スキップ(散らばりの空行)
+    scanned++;
+    var wkRaw = data[i][1];
+    var wkN = (typeof wkRaw === 'number') ? Math.round(wkRaw) : (parseInt(wkRaw, 10) || wkRaw);
+    var day = String(data[i][2]).trim();
+    var key = mk + '|' + wkN + '|' + day;
+    var row = [mk, wkN, day, data[i][3], data[i][4]]; // 月=YYYY-MM文字列, 週=int に正規化
+    if (byKey[key]) {
+      dupCount++;
+      var ex = byKey[key];
+      var exD = hasD(ex[3]), nwD = hasD(row[3]);
+      if (exD !== nwD) { byKey[key] = nwD ? row : ex; }       // ① D ありを優先
+      else {                                                   // ② updatedAt 最新
+        var eT = uaTime(ex[4]), nT = uaTime(row[4]);
+        byKey[key] = (!isNaN(nT) && (isNaN(eT) || nT >= eT)) ? row : ex;
+      }
+    } else byKey[key] = row;
+  }
+
+  var rows = Object.keys(byKey).map(function(k){ return byKey[k]; });
+  rows.sort(function(a, b){
+    if (a[0] !== b[0]) return a[0] < b[0] ? -1 : 1;
+    if (a[1] !== b[1]) return a[1] - b[1];
+    return (DOW[a[2]] || 99) - (DOW[b[2]] || 99);
+  });
+
+  var summary = {
+    status:'OK', dryRun: dryRun, oldLastRow: lastRow,
+    scannedDataRows: scanned, uniqueRows: rows.length, duplicatesMerged: dupCount,
+    firstRows: rows.slice(0, 3).map(function(r){ return r.slice(0, 3); }),
+    lastRows:  rows.slice(-3).map(function(r){ return r.slice(0, 3); })
+  };
+  if (dryRun) return summary;
+
+  // 本実行
+  sh.getRange(2, 1, sh.getMaxRows() - 1, COLS).clearContent();      // 既存データ領域を一掃
+  if (rows.length > 0) sh.getRange(2, 1, rows.length, COLS).setValues(rows);
+  sh.getRange(1, 1, sh.getMaxRows(), 1).setNumberFormat('@');       // A列(月) 文字列固定
+  if (rows.length > 0) sh.getRange(2, 5, rows.length, 1).setNumberFormat('yyyy/mm/dd hh:mm'); // E列 日付書式
+  summary.newLastRow = 1 + rows.length;
+  return summary;
 }
