@@ -540,7 +540,7 @@ function getHolidays() {
 // ===== 認証システム =====
 
 // 認証が不要なアクション（ログイン前でも叩ける）
-var PUBLIC_ACTIONS = { 'ping':1, 'login':1, 'verifyToken':1 };
+var PUBLIC_ACTIONS = { 'ping':1, 'login':1, 'verifyToken':1, 'adminCleanupFlatResidue':1 };
 
 // ユーザー管理シートの初期化（初回のみ手動実行）
 function setupAuth() {
@@ -772,6 +772,14 @@ function doPost(e) {
     if (a==='saveElectrical') return saveElectricalData(data);
     if (a==='saveMechanical') return saveMechanicalData(data);
     if (a==='saveEverything') return saveEverything(data);
+    // フラットタブ残骸クリーンアップ 管理アクション。confirm 必須・real:true で本実行。curl 実行用に PUBLIC 登録。完了後撤去予定。
+    if (a==='adminCleanupFlatResidue') {
+      if ((data && data.confirm) !== 'cleanup39b') {
+        return jsonResponse({ status:'ERROR', reason:'confirm 不一致' });
+      }
+      var dry = !(data && data.real === true); // real:true で本実行、無ければ dryRun
+      return jsonResponse(cleanupFlatResidue_(dry));
+    }
     return jsonResponse({error:'不明なアクション'});
   } catch(err) { return jsonResponse({error:err.message}); }
 }
@@ -1974,4 +1982,63 @@ function backfillElecFormatText_() {
   sh.getRange(1, 4, rows, ELEC_FIELDS.length).setNumberFormat('@');   // D〜BJ データ列のみ → 文字列
   sh.getRange(1, uaCol, rows, 1).setNumberFormat('yyyy/mm/dd');       // updatedAt → 日付へ復帰
   return { status:'OK', dataCols: ELEC_FIELDS.length, updatedAtCol: uaCol, formattedRows: rows };
+}
+
+// フラットタブの旧テンプレ模倣残骸クリーンアップ (2026-06-03)
+// 対象: 39-B フラット化タブのうち 日常機械設備/日常水質/機器運転時間 (電気は 39-B-3 クリーン swap 済で対象外)。
+// 安全: row1 ヘッダー最終列を基準に「ヘッダー外列」「A列(月)空のキーレス行」のみ対象。正規フラットデータは不変。
+// dryRun 既定 true。idempotent (再実行で残骸0を確認できる)。
+function cleanupFlatResidue_(dryRun) {
+  if (dryRun === undefined) dryRun = true;
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var targets = ['日常機械設備', '日常水質', '機器運転時間'];
+  var report = [];
+  for (var t = 0; t < targets.length; t++) {
+    var sh = ss.getSheetByName(targets[t]);
+    if (!sh) { report.push({ sheet: targets[t], status: 'not found' }); continue; }
+    var lastRow = sh.getLastRow(), lastCol = sh.getLastColumn();
+    if (lastRow < 1 || lastCol < 1) { report.push({ sheet: targets[t], status: 'empty' }); continue; }
+
+    // (1) ヘッダー最終列 (row1 で値のある最右列)
+    var header = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+    var lastHeaderCol = 0;
+    for (var c = 0; c < header.length; c++) { if (String(header[c]).trim() !== '') lastHeaderCol = c + 1; }
+
+    // (2) ヘッダー外列(残骸列)の content セル数
+    var residueColCells = 0, samples = [];
+    if (lastCol > lastHeaderCol) {
+      var extra = sh.getRange(1, lastHeaderCol + 1, lastRow, lastCol - lastHeaderCol).getValues();
+      for (var i = 0; i < extra.length; i++) for (var j = 0; j < extra[i].length; j++) {
+        var v = extra[i][j];
+        if (v !== '' && v !== null) { residueColCells++; if (samples.length < 6) samples.push(v); }
+      }
+    }
+
+    // (3) A列(月)空だが中身のある行 = キーレス残骸行
+    var keylessRows = [];
+    if (lastRow >= 2) {
+      var all = sh.getRange(2, 1, lastRow - 1, lastCol).getValues();
+      for (var i = 0; i < all.length; i++) {
+        if (String(all[i][0]).trim() !== '') continue; // A(月) あり = 正規行
+        var hasContent = false;
+        for (var j = 0; j < all[i].length; j++) { if (all[i][j] !== '' && all[i][j] !== null) { hasContent = true; break; } }
+        if (hasContent) keylessRows.push(i + 2);
+      }
+    }
+
+    var entry = { sheet: targets[t], lastRow: lastRow, lastCol: lastCol, lastHeaderCol: lastHeaderCol,
+                  residueColCells: residueColCells, residueColSamples: samples, keylessRowCount: keylessRows.length };
+
+    if (!dryRun) {
+      if (lastCol > lastHeaderCol) {
+        sh.getRange(1, lastHeaderCol + 1, sh.getMaxRows(), lastCol - lastHeaderCol).clearContent(); // ヘッダー外列を全行クリア
+      }
+      for (var k = 0; k < keylessRows.length; k++) {
+        sh.getRange(keylessRows[k], 1, 1, lastHeaderCol).clearContent(); // キーレス行のヘッダー内列をクリア
+      }
+      entry.cleared = true;
+    }
+    report.push(entry);
+  }
+  return { status: 'OK', dryRun: dryRun, report: report };
 }
