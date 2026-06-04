@@ -787,20 +787,52 @@ function getData(month) {
     for(var f in FIELD_MAP){var v=row[FIELD_MAP[f]-1];rec[f]=(v===''||v===null)?null:v;} rec.updatedAt=row[33]; result.push(rec);
   }} return jsonResponse({data:result,month:month});
 }
+// Phase 25-c-ζ: N+1 根絶版（水質）。findRow 毎行 getValues（saveAll の週×日 二重 N+1）を撤廃。
+// 全週・全日を 1 パスで処理: getValues は索引マップ用に 1 回のみ、更新は flushRowUpdates で
+// 連続行を batched setValues、新規は末尾 setValues 一括、sortSheet も全体で 1 回のみ。
+// 書込まれる行ベクトル rv（列＝フィールドのマッピング: 日付=col4 / FIELD_MAP=col5..33 含む終沈
+// tempFinal/transFinal/phFinal / updatedAt=col34）は改修前と厳密に同一。findRow→索引・per-row→
+// batched 以外のロジック（空 dd skip・toDateStr・FIELD_MAP ループ順）は不変。
+function saveWaterWeeks(month, startDate, weeks) {
+  var ss=SpreadsheetApp.getActiveSpreadsheet(),sheet=ss.getSheetByName('日常水質');
+  if(!sheet) return 0;
+  var now=new Date(),cnt=0;
+  // 索引マップ: 当月行のみ採用、キー = week|day（findRow と同じ matchMonth 判定・先勝ち）。
+  var lr=sheet.getLastRow(),indexMap={};
+  if(lr>=2){
+    var idx=sheet.getRange(2,1,lr-1,3).getValues();
+    for(var ii=0;ii<idx.length;ii++){
+      if(!matchMonth(idx[ii][0],month))continue;
+      var ik=String(idx[ii][1])+'|'+String(idx[ii][2]);
+      if(!(ik in indexMap))indexMap[ik]=ii+2;
+    }
+  }
+  var updates=[],newRows=[];
+  for(var wn in weeks){var days=weeks[wn]; if(!days)continue; var wk=parseInt(wn,10);
+    for(var dc in days){var dd=days[dc]; if(!dd)continue; var dn=DAY_NAMES[dc]; if(!dn)continue;
+      var rv=[month,wk,dn,toDateStr(dd.date)||''];
+      for(var f in FIELD_MAP){var v=dd[f];rv.push(v!=null&&v!=undefined&&v!==''?v:'');} rv.push(now);
+      var ri=indexMap[String(wk)+'|'+dn];
+      if(ri){updates.push({r:ri,v:rv});}else{newRows.push(rv);} cnt++;
+    }
+  }
+  flushRowUpdates(sheet,updates);
+  if(newRows.length>0){
+    sheet.getRange(sheet.getLastRow()+1,1,newRows.length,newRows[0].length).setValues(newRows);
+  }
+  sortSheet(sheet);
+  return cnt;
+}
 function saveWeekData(data) {
   var month=data.month,week=data.week,days=data.days;
   if(!month||!week||!days) return jsonResponse({error:'パラメータ不足'});
-  var ss=SpreadsheetApp.getActiveSpreadsheet(),sheet=ss.getSheetByName('日常水質'),now=new Date(),cnt=0;
-  for(var dc in days){var dd=days[dc]; if(!dd)continue; var dn=DAY_NAMES[dc]; if(!dn)continue;
-    var ri=findRow(sheet,month,week,dn),rv=[month,parseInt(week),dn,toDateStr(dd.date)||''];
-    for(var f in FIELD_MAP){var v=dd[f];rv.push(v!=null&&v!=undefined&&v!==''?v:'');} rv.push(now);
-    if(ri>0){sheet.getRange(ri,1,1,rv.length).setValues([rv]);}else{sheet.appendRow(rv);} cnt++;
-  } sortSheet(sheet); return jsonResponse({status:'ok',message:'水質'+cnt+'日分保存',savedCount:cnt});
+  var weeks={}; weeks[week]=days; // 単一週を全週パスへ委譲（saveWeek action 用・挙動不変）
+  var cnt=saveWaterWeeks(month,data.startDate||'',weeks);
+  return jsonResponse({status:'ok',message:'水質'+cnt+'日分保存',savedCount:cnt});
 }
 function saveAllData(data) {
   var month=data.month,weeks=data.weeks; if(!month||!weeks) return jsonResponse({error:'パラメータ不足'});
-  var t=0; for(var wn in weeks){var r=saveWeekData({month:month,week:parseInt(wn),startDate:data.startDate,days:weeks[wn]});
-    var p=JSON.parse(r.getContent()); if(p.savedCount) t+=p.savedCount;}
+  var t=saveWaterWeeks(month,data.startDate||'',weeks); // 全週 1 パス（索引 1 回・sort 1 回）
   return jsonResponse({status:'ok',message:'水質'+t+'日分保存',savedCount:t});
 }
 
@@ -883,31 +915,68 @@ function saveEquipmentData(data) {
 }
 
 // ===== 電気設備 =====
+// Phase 25-c-ζ: N+1 根絶版（電気）。findRow 毎行 getValues を撤廃し索引マップへ。
+// rv（[month,week,day] + ELEC_FIELDS 値 + updatedAt）は改修前と厳密に同一。
+// データ列(D〜)の '@' 書式統一は「書込んだ全行のみ」へ batched 適用（従来挙動を保全）。
 function saveElectricalData(data) {
   var month=data.month,el=data.electrical; if(!month||!el) return jsonResponse({error:'パラメータ不足'});
   var ss=SpreadsheetApp.getActiveSpreadsheet(),sheet=ss.getSheetByName('日常電気設備');
   if(!sheet) return jsonResponse({error:'シートなし'}); var now=new Date(),cnt=0;
+  var lr=sheet.getLastRow(),indexMap={};
+  if(lr>=2){
+    var idx=sheet.getRange(2,1,lr-1,3).getValues();
+    for(var ii=0;ii<idx.length;ii++){
+      if(!matchMonth(idx[ii][0],month))continue;
+      var ik=String(idx[ii][1])+'|'+String(idx[ii][2]);
+      if(!(ik in indexMap))indexMap[ik]=ii+2;
+    }
+  }
+  var updates=[],newRows=[];
   for(var wn in el){var wd=el[wn]; for(var dc in wd){var dd=wd[dc]; if(!dd)continue;
-    var dn=DAY_NAMES[dc]; if(!dn)continue; var ri=findRow(sheet,month,parseInt(wn),dn);
-    var rv=[month,parseInt(wn),dn]; for(var f=0;f<ELEC_FIELDS.length;f++){var v=dd[ELEC_FIELDS[f]];rv.push(v!=null&&v!=undefined&&v!==''?v:'');} rv.push(now);
-    var targetRow;
-    if(ri>0){sheet.getRange(ri,1,1,rv.length).setValues([rv]); targetRow=ri;}
-    else{sheet.appendRow(rv); targetRow=sheet.getLastRow();}
-    sheet.getRange(targetRow, 4, 1, ELEC_FIELDS.length).setNumberFormat('@'); // 電気データ列(D〜)を文字列書式に統一
-    cnt++;
-  }} return jsonResponse({status:'ok',message:'電気'+cnt+'日分保存',savedCount:cnt});
+    var dn=DAY_NAMES[dc]; if(!dn)continue; var wk=parseInt(wn,10);
+    var rv=[month,wk,dn]; for(var f=0;f<ELEC_FIELDS.length;f++){var v=dd[ELEC_FIELDS[f]];rv.push(v!=null&&v!=undefined&&v!==''?v:'');} rv.push(now);
+    var ri=indexMap[String(wk)+'|'+dn];
+    if(ri){updates.push({r:ri,v:rv});}else{newRows.push(rv);} cnt++;
+  }}
+  var EL=ELEC_FIELDS.length;
+  flushRowUpdates(sheet,updates);
+  setNumberFormatGroups(sheet,updates,4,EL); // 既存更新行のデータ列(D〜)を '@' に（連続グループ単位）
+  if(newRows.length>0){
+    var appendStart=sheet.getLastRow()+1;
+    sheet.getRange(appendStart,1,newRows.length,newRows[0].length).setValues(newRows);
+    sheet.getRange(appendStart,4,newRows.length,EL).setNumberFormat('@'); // 新規行のデータ列(D〜)を '@' に
+  }
+  return jsonResponse({status:'ok',message:'電気'+cnt+'日分保存',savedCount:cnt});
 }
 
 // ===== 機械設備 =====
+// Phase 25-c-ζ: N+1 根絶版（機械）。findRow 毎行 getValues を撤廃し索引マップへ。
+// rv（[month,week,day,JSON,updatedAt]）は改修前と厳密に同一。col4 の JSON マッピング不変。
 function saveMechanicalData(data) {
   var month=data.month,mech=data.mechanical; if(!month||!mech) return jsonResponse({error:'パラメータ不足'});
   var ss=SpreadsheetApp.getActiveSpreadsheet(),sheet=ss.getSheetByName('日常機械設備');
   if(!sheet) return jsonResponse({error:'シートなし'}); var now=new Date(),cnt=0;
+  var lr=sheet.getLastRow(),indexMap={};
+  if(lr>=2){
+    var idx=sheet.getRange(2,1,lr-1,3).getValues();
+    for(var ii=0;ii<idx.length;ii++){
+      if(!matchMonth(idx[ii][0],month))continue;
+      var ik=String(idx[ii][1])+'|'+String(idx[ii][2]);
+      if(!(ik in indexMap))indexMap[ik]=ii+2;
+    }
+  }
+  var updates=[],newRows=[];
   for(var wn in mech){var wd=mech[wn]; for(var dc in wd){var dd=wd[dc]; if(!dd)continue;
-    var dn=DAY_NAMES[dc]; if(!dn)continue; var ri=findRow(sheet,month,parseInt(wn),dn);
-    var js=JSON.stringify(dd),rv=[month,parseInt(wn),dn,js,now];
-    if(ri>0){sheet.getRange(ri,1,1,rv.length).setValues([rv]);}else{sheet.appendRow(rv);} cnt++;
-  }} return jsonResponse({status:'ok',message:'機械'+cnt+'日分保存',savedCount:cnt});
+    var dn=DAY_NAMES[dc]; if(!dn)continue; var wk=parseInt(wn,10);
+    var js=JSON.stringify(dd),rv=[month,wk,dn,js,now];
+    var ri=indexMap[String(wk)+'|'+dn];
+    if(ri){updates.push({r:ri,v:rv});}else{newRows.push(rv);} cnt++;
+  }}
+  flushRowUpdates(sheet,updates);
+  if(newRows.length>0){
+    sheet.getRange(sheet.getLastRow()+1,1,newRows.length,newRows[0].length).setValues(newRows);
+  }
+  return jsonResponse({status:'ok',message:'機械'+cnt+'日分保存',savedCount:cnt});
 }
 
 // ===== 全データ一括保存 =====
@@ -1045,6 +1114,39 @@ function findRow(sheet,month,week,dayName) {
   var lr=sheet.getLastRow();if(lr<=1) return -1;
   var d=sheet.getRange(2,1,lr-1,3).getValues();
   for(var i=0;i<d.length;i++){if(matchMonth(d[i][0],month)&&d[i][1]===parseInt(week)&&d[i][2]===dayName) return i+2;} return -1;
+}
+// Phase 25-c-ζ: 既存行 update を「連続行グループ単位」の setValues に集約する共通ヘルパー。
+// updates = [{r: 絶対行番号, v: 行配列}]。連続する r かつ同一幅のみ 1 レンジに束ね、
+// 非連続/幅違いは別レンジで書込む。書込まれるセル・値・型は per-row setValues と厳密に同一。
+function flushRowUpdates(sheet, updates) {
+  if (!updates || updates.length === 0) return;
+  updates.sort(function(a, b){ return a.r - b.r; });
+  var i = 0;
+  while (i < updates.length) {
+    var runStart = i;
+    var width = updates[i].v.length;
+    var rows = [updates[i].v];
+    while (i + 1 < updates.length &&
+           updates[i + 1].r === updates[i].r + 1 &&
+           updates[i + 1].v.length === width) {
+      i++; rows.push(updates[i].v);
+    }
+    sheet.getRange(updates[runStart].r, 1, rows.length, width).setValues(rows);
+    i++;
+  }
+}
+// Phase 25-c-ζ: update 対象行のサブレンジへ NumberFormat を連続グループ単位で適用するヘルパー。
+// 旧 per-row setNumberFormat と同じ「書込んだ行のみ」を対象にしつつ呼出回数を圧縮する。
+function setNumberFormatGroups(sheet, updates, startCol, width) {
+  if (!updates || updates.length === 0) return;
+  var rows = updates.map(function(u){ return u.r; }).sort(function(a, b){ return a - b; });
+  var i = 0;
+  while (i < rows.length) {
+    var runStart = i;
+    while (i + 1 < rows.length && rows[i + 1] === rows[i] + 1) i++;
+    sheet.getRange(rows[runStart], startCol, i - runStart + 1, width).setNumberFormat('@');
+    i++;
+  }
 }
 function sortSheet(sheet) {
   try {
