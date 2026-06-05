@@ -1695,6 +1695,13 @@ const COPY_FIELDS = [
   "tempFinal", "transFinal", "phFinal"
 ];
 
+// 祝日ブランク集合（2026-06-06 案B）: 返送/余剰/放流の累積メータ読み値。
+// 祝日(holidaySet 該当日)では Excel 書込(fillWaterSheet 積算表 / fillElecSheet 積算読み)・
+// 保存(buildWaterDaysPayload)・運転管理月報 K/M 按分(fillProratedFlowDiff)からブランク化する。
+// 電力量/上水は既に祝日へ入っていないため対象外（正常データを隠すリスク最小化のためこの3キーに限定）。
+// 保存⇔同期の非対称（削除非伝播）は不変。案A（トゥームストーン）は採用しない。
+const KAKE_HOLIDAY_BLANK_KEYS = ["returnSludge", "excessSludge", "discharge"];
+
 // Phase 25-c-ε (2026-05-27): 水質タブの 5 日目キーを nextMon → fri に統一。
 // 同期で server (fri) → localStorage (nextMon) の不整合で空欄表示 → 入力 → save 時の
 // 全 field null 上書きで server data 消失バグ (memory Phase 15) の再発を修正。
@@ -3454,13 +3461,20 @@ function buildWaterDaysPayload(weekIdx) {
     });
     if (!hasAnyData) return;
     const dt = getActualDate(weekIdx, appKey);
+    // 案B(2026-06-06): その日が祝日なら累積読み値3キーは送らない（将来サーバへ祝日値を入れない予防）。
+    // 既存の空除外（null/undefined/"" skip・全空日skip）は不変。削除/null 上書きは発生しない（対称性維持）。
+    let isHolSave = false;
+    try { const _hs = getHolidaySetFromCache(); isHolSave = !!(_hs && dt && _hs.has(dateToStr(dt))); } catch (e) {}
     // null/undefined/"" の field を skip して payload を構築 (Phase 25-c-ε)
     const payload = { date: fmtYMD(dt) };
     Object.keys(src).forEach(k => {
       const v = src[k];
       if (v === null || v === undefined || v === "") return;
+      if (isHolSave && KAKE_HOLIDAY_BLANK_KEYS.indexOf(k) >= 0) return;  // 祝日の積算読み値は送らない
       payload[k] = v;
     });
+    // 祝日除外で date のみになった日は行作成トリガーにしない（既存の date-only skip 方針と整合）
+    if (Object.keys(payload).length <= 1) return;
     // Phase 18-b: 送信前に bikou を sanitize（ISO タイムスタンプの再循環を断つ）
     if ('bikou' in payload) {
       const cleaned = sanitizeBikou(payload.bikou);
@@ -5311,11 +5325,19 @@ function fillWaterSheet(ws, yyyy, mm, holidaySet) {
       const dataKey = APP_KEY_MAP[dk];
       const day = weeklyData.weeks[w] && weeklyData.weeks[w][dataKey];
       if (!day) continue;
+      // 案B(2026-06-06): その日が祝日なら累積読み値3キーは書かず空欄（4/29 等の祝日復活防止）。
+      // 外観/臭気の固定値が dayHasMeasurement で祝日列を除外しているのと同じ趣旨の横展開。
+      const actualDk = getActualDate(w, dk);
+      const isHolDk = !!(actualDk && holidaySet && holidaySet.has(dateToStr(actualDk)));
       for (const key in ITEM_OFFSETS) {
         const row = dataRowBase + ITEM_OFFSETS[key];
         const v = day[key];
         // 積算値テーブルの項目はI列起点、測定場所テーブルの項目はJ列起点
         const targetCol = RUISAN_KEYS.indexOf(key) >= 0 ? colRuisan : colMeasure;
+        if (isHolDk && KAKE_HOLIDAY_BLANK_KEYS.indexOf(key) >= 0) {
+          ws.getCell(row, targetCol).value = null;  // 祝日の積算読み値はブランク
+          continue;
+        }
         setCell(ws, row, targetCol, v);
       }
       // 測定者: 測定場所テーブル所属なのでJ列起点
@@ -5626,6 +5648,9 @@ function guardIndexBlank(formula) {
 function fillProratedFlowDiff(wb, yyyy, mm) {
   const ws = wb.getWorksheet("運転管理月報");
   if (!ws) return;
+  // 案B(2026-06-06): 祝日の K/M 按分行は空欄にし、祝日の取り分を同ギャップの非祝日(当月)日へ再配分する。
+  let holSet = null;
+  try { holSet = getHolidaySetFromCache(); } catch (e) { holSet = null; }
   const daysInMonth = new Date(yyyy, mm, 0).getDate();
   const prevStr = mm === 1 ? (yyyy - 1) + "-12" : yyyy + "-" + String(mm - 1).padStart(2, "0");
   const nextStr = mm === 12 ? (yyyy + 1) + "-01" : yyyy + "-" + String(mm + 1).padStart(2, "0");
@@ -5651,12 +5676,27 @@ function fillProratedFlowDiff(wb, yyyy, mm) {
       const A = points[i], B = points[i + 1];
       const dayDiff = Math.round((B.date - A.date) / 86400000);
       if (dayDiff <= 0) continue;
-      const daily = (B.value - A.value) / dayDiff; // 丸めない
+      const daily = (B.value - A.value) / dayDiff; // 丸めない（暦日レート）
+      // ギャップ a+1..b の当月該当日を列挙し祝日/非祝日を分離。祝日行は空欄（事前 null のまま）、
+      // 祝日の取り分を同ギャップの非祝日(当月)日へ再配分:
+      //   newDaily = daily * N / M   (N=当月ギャップ日数, M=当月非祝日ギャップ日数)
+      //   → Σ(newDaily over M 日) = daily*N（従来の当ギャップ月内合計と一致＝reconcile）。
+      //   祝日が無ければ N=M で newDaily=daily（従来挙動と完全一致）。
+      const inMonthDays = [];
+      let nonHolCount = 0;
       for (let k = 1; k <= dayDiff; k++) {
         const d = new Date(A.date.getFullYear(), A.date.getMonth(), A.date.getDate() + k);
         if (d.getFullYear() === yyyy && (d.getMonth() + 1) === mm) {
-          ws.getCell(5 + d.getDate(), spec.col).value = daily; // numFmt はテンプレ既存スタイルを踏襲
+          const isHol = !!(holSet && holSet.has(dateToStr(d)));
+          inMonthDays.push({ d: d, isHol: isHol });
+          if (!isHol) nonHolCount++;
         }
+      }
+      if (nonHolCount === 0) continue; // 当月ギャップが全て祝日 → 配分先なし（空欄維持）
+      const newDaily = daily * inMonthDays.length / nonHolCount; // 祝日分を非祝日へ再配分
+      for (const g of inMonthDays) {
+        if (g.isHol) continue; // 祝日行は空欄
+        ws.getCell(5 + g.d.getDate(), spec.col).value = newDaily; // numFmt はテンプレ既存スタイルを踏襲
       }
     }
   }
@@ -5989,10 +6029,13 @@ function fillElecSheet(ws, yyyy, mm) {
       // （運転管理月報 J/L/N と同一源泉）。値あれば値、無ければ Part2 ルール（実測日=「-」/祝日=空欄）。
       const wDay = weeklyData.weeks[w] && weeklyData.weeks[w][dk];
       const TOTAL_SRC = { 44: "returnSludge", 48: "excessSludge", 52: "discharge" };
+      // 案B(2026-06-06): 祝日は累積読み値を書かず writeElecEmptyCell（祝日空欄分岐）へ落とす。
+      let isHolElec = false;
+      try { const _hs = getHolidaySetFromCache(); isHolElec = !!(_hs && _hs.has(dateToStr(actual))); } catch (e) {}
       for (const off in TOTAL_SRC) {
         const wv = wDay ? wDay[TOTAL_SRC[off]] : null;
-        if (wv !== null && wv !== undefined && wv !== "") setCell(ws, base + Number(off), col, wv);
-        else writeElecEmptyCell(ws, base + Number(off), col, actual);
+        if (!isHolElec && wv !== null && wv !== undefined && wv !== "") setCell(ws, base + Number(off), col, wv);
+        else writeElecEmptyCell(ws, base + Number(off), col, actual);  // 祝日 or 空 → 空欄(祝日は null)
       }
       // 項目③: 点検者氏名(base+33=R36系) に月単位測定者を書く（電気データのある実測日のみ）
       if (inspName && hasElecData) setCell(ws, base + 33, col, inspName);
