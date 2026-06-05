@@ -750,7 +750,6 @@ function doGet(e) {
     if (a==='verifyToken') return verifyTokenApi(token);
     if (a==='getData') return getData(e.parameter.month);
     if (a==='getAllData') return getAllData(e.parameter.month);
-    if (a==='exportExcel') return exportExcel(e.parameter.month,e.parameter.templateId);
     if (a==='computeMldo') return computeMldoForMonth(e.parameter.month, e.parameter.recompute);
     if (a==='checkMldo') return checkMldoStatus(e.parameter.month);
     if (a==='getHolidays') return getHolidays();
@@ -1013,101 +1012,7 @@ function getAllData(month) {
   return jsonResponse(result);
 }
 
-// ===== Excel出力（全シート対応） =====
-function exportExcel(month, templateId) {
-  if(!month) return jsonResponse({error:'月が指定されていません'});
-  if(!templateId){var ss=SpreadsheetApp.getActiveSpreadsheet(),st=ss.getSheetByName('設定');
-    if(st){var sd=st.getDataRange().getValues();for(var i=0;i<sd.length;i++){if(sd[i][0]==='テンプレートID'){templateId=sd[i][1];break;}}}}
-  if(!templateId) return jsonResponse({error:'テンプレートIDなし'});
-
-  try {
-    var tf=DriveApp.getFileById(templateId),ml=month.replace('-','年')+'月',nf='加計'+ml.substring(5);
-    var cf=tf.makeCopy(nf),nid=cf.getId(),wb=SpreadsheetApp.openById(nid);
-    var ss2=SpreadsheetApp.getActiveSpreadsheet();
-    var sheets=wb.getSheets();
-
-    // ===== 日常水質 =====
-    var wSheet=sheets[0],ds=ss2.getSheetByName('日常水質');
-    if(ds&&ds.getLastRow()>1){
-      var ad=ds.getRange(2,1,ds.getLastRow()-1,34).getValues();
-      var md=ad.filter(function(r){return matchMonth(r[0],month);});
-      var w1m=md.find(function(r){return r[1]===1&&r[2]==='月';});
-      if(w1m&&w1m[3]) wSheet.getRange(3,9).setValue(new Date(w1m[3]));
-      for(var r=0;r<md.length;r++){var row=md[r],wc=WEEK_CONFIG[row[1]];if(!wc)continue;
-        var dc=DAY_REVERSE[row[2]];if(!dc)continue;var col=DAY_COLUMNS[dc];if(!col)continue;
-        for(var f in ITEM_OFFSETS){var v=row[FIELD_MAP[f]-1];if(v!==''&&v!==null&&v!==undefined) wSheet.getRange(wc.dataRow+ITEM_OFFSETS[f],col).setValue(v);}
-        var ins=row[FIELD_MAP.inspector-1]; if(ins) wSheet.getRange(wc.inspectorRow,col).setValue(ins);
-      }
-    }
-
-    // ===== 機器運転時間 =====
-    var eqSheet=null; for(var s=0;s<sheets.length;s++){if(sheets[s].getName().indexOf('機器運転')>=0){eqSheet=sheets[s];break;}}
-    if(eqSheet){var eqDs=ss2.getSheetByName('機器運転時間');
-      if(eqDs&&eqDs.getLastRow()>1){var eqD=eqDs.getRange(2,1,eqDs.getLastRow()-1,9).getValues();
-        var eqM=eqD.filter(function(r){return matchMonth(r[0],month);});
-        for(var r=0;r<eqM.length;r++){var row=eqM[r],wn=row[1],el=row[2],ws2=EQUIP_WEEK_START[wn];if(!ws2)continue;
-          var ei=EQUIP_LABELS.indexOf(el);if(ei<0)continue;var tr=ws2+ei;
-          var dk=['mon','tue','wed','thu','fri'];
-          for(var d=0;d<dk.length;d++){var v=row[3+d];if(v!==''&&v!==null&&v!==undefined) eqSheet.getRange(tr,4+d).setValue(v);}
-        }
-      }
-    }
-
-    // ===== 電気設備 =====
-    var elSheet=null; for(var s=0;s<sheets.length;s++){if(sheets[s].getName().indexOf('電気設備')>=0){elSheet=sheets[s];break;}}
-    if(elSheet){var elDs=ss2.getSheetByName('日常電気設備');
-      if(elDs&&elDs.getLastRow()>1){var elD=elDs.getRange(2,1,elDs.getLastRow()-1,34).getValues();
-        var elM=elD.filter(function(r){return matchMonth(r[0],month);});
-        for(var r=0;r<elM.length;r++){var row=elM[r],wn=row[1],dn=row[2],dc=DAY_REVERSE[dn];if(!dc)continue;
-          var ws3=ELEC_WEEK_START[wn];if(!ws3)continue;var col=ELEC_DAY_COL[dc];if(!col)continue;
-          for(var f in ELEC_OFFSETS){var fi=ELEC_FIELDS.indexOf(f);if(fi<0)continue;var v=row[3+fi];
-            if(v!==''&&v!==null&&v!==undefined) elSheet.getRange(ws3+ELEC_OFFSETS[f],col).setValue(v);}
-        }
-      }
-    }
-
-    // ===== 機械設備 =====
-    var mechSheet1=null,mechSheet2=null;
-    for(var s=0;s<sheets.length;s++){
-      var sn=sheets[s].getName();
-      if(sn.indexOf('機械設備')>=0||sn.indexOf('機械')>=0){
-        if(!mechSheet1) mechSheet1=sheets[s]; // 日常機械設備シート
-      }
-    }
-    if(mechSheet1){var mechDs=ss2.getSheetByName('日常機械設備');
-      if(mechDs&&mechDs.getLastRow()>1){var mechD=mechDs.getRange(2,1,mechDs.getLastRow()-1,5).getValues();
-        var mechM=mechD.filter(function(r){return matchMonth(r[0],month);});
-        for(var r=0;r<mechM.length;r++){
-          var row=mechM[r],wn=row[1],dn=row[2],dc=DAY_REVERSE[dn];if(!dc)continue;
-          var mechData={}; try{mechData=JSON.parse(row[3]);}catch(e){continue;}
-          var wk=MECH_WEEK[wn]; if(!wk) continue;
-          var col=MECH_DAY_COL[dc]; if(!col) continue;
-          // 1/2のデータを書き込み
-          for(var key in MECH_1_MAP){
-            if(mechData[key]!==undefined&&mechData[key]!==null&&mechData[key]!==''){
-              var targetRow=MECH_1_MAP[key]+wk.p1;
-              mechSheet1.getRange(targetRow,col).setValue(mechData[key]);
-            }
-          }
-          // 2/2のデータを書き込み
-          for(var key in MECH_2_MAP){
-            if(mechData[key]!==undefined&&mechData[key]!==null&&mechData[key]!==''){
-              var targetRow=MECH_2_MAP[key]+wk.p2-63; // 2/2の行はp2基準に調整
-              mechSheet1.getRange(targetRow,col).setValue(mechData[key]);
-            }
-          }
-        }
-      }
-    }
-
-    SpreadsheetApp.flush();
-    var eu='https://docs.google.com/spreadsheets/d/'+nid+'/export?format=xlsx';
-    var tk=ScriptApp.getOAuthToken(),rsp=UrlFetchApp.fetch(eu,{headers:{'Authorization':'Bearer '+tk}});
-    var bl=rsp.getBlob();bl.setName(nf+'.xlsx');var ef=DriveApp.createFile(bl);
-    DriveApp.getFileById(nid).setTrashed(true);
-    return jsonResponse({status:'ok',message:ml+'のExcelファイルを生成しました',fileId:ef.getId(),fileUrl:ef.getUrl(),downloadUrl:'https://drive.google.com/uc?export=download&id='+ef.getId()});
-  } catch(err) { return jsonResponse({error:'Excel生成エラー: '+err.message}); }
-}
+// ===== Excel出力部 (exportExcel) を撤去: クライアント側 ExcelJS へ一本化 (2026-06-05) =====
 
 // ===== 共通関数 =====
 function findRow(sheet,month,week,dayName) {
