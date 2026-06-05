@@ -5067,6 +5067,37 @@ async function exportExcel() {
   // 運転管理月報 K/M: 返送汚泥(J)/余剰汚泥(L)読み値の按分差分を全ギャップ日に値書込（クロス月按分）
   try { fillProratedFlowDiff(wb, yyyy, mm); } catch (e) { console.error("fillProratedFlowDiff:", e); }
 
+  // ===== 修正3(2026-06-05): 全シート・全セルのフォントを ＭＳ Ｐ明朝 に統一 =====
+  // 機器運転時間シートのみ ＭＳ Ｐゴシック だったため全体を明朝へ揃える。name のみ上書きし
+  // size/bold/color 等の他属性は保持。フォント名はテンプレ既存の明朝セルを動的検出して採用
+  // （全角/半角の取り違え防止）。検出不可時のみテンプレ実値リテラル「ＭＳ Ｐ明朝」へフォールバック。
+  // 注意: U+30FC(長音ー)は明朝で表示崩れの既知問題（既存ダッシュ出力は U+002D 化済）。
+  try {
+    let minchoName = null;
+    wb.eachSheet((sheet) => {
+      if (minchoName) return;
+      sheet.eachRow({ includeEmpty: false }, (row) => {
+        if (minchoName) return;
+        row.eachCell({ includeEmpty: false }, (cell) => {
+          if (!minchoName && cell.font && cell.font.name && cell.font.name.indexOf('明朝') >= 0) {
+            minchoName = cell.font.name;
+          }
+        });
+      });
+    });
+    if (!minchoName) minchoName = 'ＭＳ Ｐ明朝';
+    wb.eachSheet((sheet) => {
+      sheet.eachRow({ includeEmpty: false }, (row) => {
+        row.eachCell({ includeEmpty: false }, (cell) => {
+          const f = cell.font || {};
+          if (f.name !== minchoName) {
+            cell.font = Object.assign({}, f, { name: minchoName });
+          }
+        });
+      });
+    });
+  } catch (e) { console.error("フォント統一:", e); }
+
   let out = await wb.xlsx.writeBuffer();
   out = await sanitizeXlsxBuffer(out);
   const blob = new Blob([out], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
@@ -5158,6 +5189,19 @@ function fillWaterSheet(ws, yyyy, mm, holidaySet) {
   const DATA_ROW_BASE = 4;
   const DATE_ROW_BASE = 3;
   const INSP_ROW_BASE = 15;
+
+  // ===== 修正2(2026-06-05): 積算行 平均セルO列(15)の数値書式を全5週で1週目に統一 =====
+  // 症状: 2週目以降の平均書式が1週目より桁が少なく、微小値(無効電力量 0.0003 等)が 0.00 に丸まる。
+  // 対策: 各積算行の「1週目(offset 0)平均セルの numFmt」を採取し、全週へ適用（式は不変、行ごとに1週目へ揃える）。
+  const RUISAN_AVG_KEYS = ["power200v", "power100v", "reactivePower", "demand", "water", "diesel", "returnSludge", "excessSludge", "discharge"];
+  const AVG_COL_FMT_BASE = 15; // O列
+  const ruisanAvgFmt = {};
+  RUISAN_AVG_KEYS.forEach((key) => {
+    const off = ITEM_OFFSETS[key];
+    if (off == null) return;
+    const f = ws.getCell(DATA_ROW_BASE + off, AVG_COL_FMT_BASE).numFmt;
+    if (f) ruisanAvgFmt[key] = f;
+  });
 
   // ===== 第1週I列: 前月最終点検日のデータを書き込む =====
   // （第2週以降のI列はテンプレート数式 =N49 等で自動参照される）
@@ -5304,20 +5348,29 @@ function fillWaterSheet(ws, yyyy, mm, holidaySet) {
     for (const key in ITEM_OFFSETS) {
       const row = dataRowBase + ITEM_OFFSETS[key];
       if (RUISAN_KEYS.indexOf(key) >= 0) {
-        // Part1: 積算値・流量行は「平均日量」= (最後の読み − 最初の読み) / (最後の日付 − 最初の日付の暦日数)。
-        // 値域 I:N(col9-14, row)、日付域 I:N(col9-14, dateRow)。範囲内の実在する最初/最後の読み値と
-        // 対応日付を LOOKUP/INDEX-MATCH で取得（I・N が空でも内側の実測点で按分）。読み値1点以下は空欄。
-        // 運転管理月報 K/M(fillProratedFlowDiff) と同じ「累積差÷日数」。四捨五入しない・fullCalcOnLoad で再計算。
-        const vr = 'I' + row + ':N' + row;
-        const dr = 'I' + dateRow + ':N' + dateRow;
-        const firstPos = 'MATCH(TRUE,INDEX((' + vr + '<>""),0),0)';
-        const lastVal = 'LOOKUP(2,1/(' + vr + '<>""),' + vr + ')';
-        const firstVal = 'INDEX(' + vr + ',' + firstPos + ')';
-        const lastDate = 'LOOKUP(2,1/(' + vr + '<>""),' + dr + ')';
-        const firstDate = 'INDEX(' + dr + ',' + firstPos + ')';
-        ws.getCell(row, AVG_COL).value = {
-          formula: 'IFERROR((' + lastVal + '-' + firstVal + ')/(' + lastDate + '-' + firstDate + '),"")'
-        };
+        if (key === 'demand') {
+          // 修正1(2026-06-05): デマンドは瞬時値(Kw)で積算メータではない。増分レート式
+          //   (最後の読み − 最初の読み)/日数 は負/ほぼ0 になり平均が 0.00 化していた。
+          //   → 日次値の単純平均（非空セルの AVERAGE, I:N。デマンドは積算テーブル I 列起点）に変更。
+          ws.getCell(row, AVG_COL).value = { formula: 'IFERROR(AVERAGE(I' + row + ':N' + row + '),"")' };
+        } else {
+          // Part1: 積算値・流量行は「平均日量」= (最後の読み − 最初の読み) / (最後の日付 − 最初の日付の暦日数)。
+          // 値域 I:N(col9-14, row)、日付域 I:N(col9-14, dateRow)。範囲内の実在する最初/最後の読み値と
+          // 対応日付を LOOKUP/INDEX-MATCH で取得（I・N が空でも内側の実測点で按分）。読み値1点以下は空欄。
+          // 運転管理月報 K/M(fillProratedFlowDiff) と同じ「累積差÷日数」。四捨五入しない・fullCalcOnLoad で再計算。
+          const vr = 'I' + row + ':N' + row;
+          const dr = 'I' + dateRow + ':N' + dateRow;
+          const firstPos = 'MATCH(TRUE,INDEX((' + vr + '<>""),0),0)';
+          const lastVal = 'LOOKUP(2,1/(' + vr + '<>""),' + vr + ')';
+          const firstVal = 'INDEX(' + vr + ',' + firstPos + ')';
+          const lastDate = 'LOOKUP(2,1/(' + vr + '<>""),' + dr + ')';
+          const firstDate = 'INDEX(' + dr + ',' + firstPos + ')';
+          ws.getCell(row, AVG_COL).value = {
+            formula: 'IFERROR((' + lastVal + '-' + firstVal + ')/(' + lastDate + '-' + firstDate + '),"")'
+          };
+        }
+        // 修正2(2026-06-05): 平均セルの数値書式を全5週で1週目に統一（微小値の 0.00 丸め回避）。式は不変。
+        if (ruisanAvgFmt[key]) ws.getCell(row, AVG_COL).numFmt = ruisanAvgFmt[key];
       } else {
         // 測定値（水温/PH/透視度/SV/MLSS 等）の平均は従来どおり AVERAGE（J:N）。
         ws.getCell(row, AVG_COL).value = { formula: 'IFERROR(AVERAGE(J' + row + ':N' + row + '),"")' };
@@ -5676,6 +5729,19 @@ function fillKakeOperationReportSheet(wb, yyyy, mm) {
   // （R6 を含む K/M 日次セルは fillProratedFlowDiff が null クリア後に値書込するため、ここでは触らない）
 }
 
+// 修正4(2026-06-05): その週の指定曜日(dk)に機器運転データが1項目でも実在するか判定。
+// wData = weeklyData.equipment[w]、wData[key][dk] が値。空(null/undefined/"")でない項目が1つでもあれば true。
+function equipDayHasData(wData, dk) {
+  if (!wData) return false;
+  for (let i = 0; i < EQUIP_KEYS.length; i++) {
+    const dd = wData[EQUIP_KEYS[i]];
+    if (!dd) continue;
+    const v = dd[dk];
+    if (v !== null && v !== undefined && v !== "") return true;
+  }
+  return false;
+}
+
 // 機器運転時間シート（加計浄化センター 21項目、29行ブロック）
 // ※対象月内の日付のみ書き込み（月跨ぎ日はスキップ）
 // ※A列・F列には週の開始・終了日付を令和形式で書き込む
@@ -5690,18 +5756,21 @@ function fillEquipSheet(ws, yyyy, mm) {
     const base = WEEK_START[w];
     const wData = weeklyData.equipment[w];
 
-    // 日付ヘッダー設定（A列=対象月内の最初の日, F列=対象月内の最後の日、令和形式）
+    // 日付ヘッダー設定（A列=データ実在の最初の日, F列=データ実在の最後の日、令和形式）
     const headerRow = DATE_HEADER_ROW[w];
     if (headerRow) {
-      // その週の月〜金のうち、対象月内にある日付を収集
+      // 修正4(2026-06-05): 名目の月〜金ではなく「その週で機器運転データが実在する曜日」だけを集める。
+      // 例: 2週目 5/4-6 が GW 祝日で空・5/7,5/8 のみ実データ → ヘッダは「5月7日 〜 5月8日」。
+      // 「データがある日」= 対象月内 かつ その曜日列に EQUIP_KEYS のいずれかが非空。
+      // 全曜日が空（または全部対象月外）の週は A/F 列とも空（名目範囲を出さない＝印刷時の誤解を防ぐ）。
       const weekDates = [];
       for (const dk of ["mon", "tue", "wed", "thu", "fri"]) {
         const dt = getActualDate(w, dk);
-        if (dt && dt.getFullYear() === yyyy && (dt.getMonth() + 1) === mm) {
+        if (dt && dt.getFullYear() === yyyy && (dt.getMonth() + 1) === mm && equipDayHasData(wData, dk)) {
           weekDates.push(dt);
         }
       }
-      // 対象月内の最初の日 → A列
+      // データ実在の最初の日 → A列 / 最後の日 → F列
       if (weekDates.length > 0) {
         const firstDay = weekDates[0];
         const lastDay = weekDates[weekDates.length - 1];
