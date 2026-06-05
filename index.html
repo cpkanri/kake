@@ -5190,17 +5190,34 @@ function fillWaterSheet(ws, yyyy, mm, holidaySet) {
   const DATE_ROW_BASE = 3;
   const INSP_ROW_BASE = 15;
 
-  // ===== 修正2(2026-06-05): 積算行 平均セルO列(15)の数値書式を全5週で1週目に統一 =====
-  // 症状: 2週目以降の平均書式が1週目より桁が少なく、微小値(無効電力量 0.0003 等)が 0.00 に丸まる。
-  // 対策: 各積算行の「1週目(offset 0)平均セルの numFmt」を採取し、全週へ適用（式は不変、行ごとに1週目へ揃える）。
+  // ===== 修正B(2026-06-06): 積算行 平均セルO列(15) の数値書式を「全5週で最も小数桁が多い書式」へ統一 =====
+  // 経緯: 修正2(2026-06-05) は「1週目の書式を全週へ適用」だったが、テンプレ上1週目が必ずしも
+  //   最も細かい書式とは限らず取りこぼした。実測: 無効電力量(reactivePower) は w1/w3/w4/w5 が
+  //   4桁("0.0000") なのに w2(R52) だけ 2桁("0.00") で、微小値(0.00025 等)が 0.00 に丸まっていた。
+  // 対策: 行ごとに全5週の numFmt を走査し「最大小数桁の書式」を採用 → 全週へ明示適用。
+  //   こうすれば「最も細かい週」に合わせるので、どの週も微小非ゼロが 0 に丸まらない（1週目依存を排除）。
+  // 真ゼロ保全: 余剰汚泥(excessSludge)・軽油(diesel) は全週とも 2桁("0.00") のため max=2桁 → "0.00" のまま
+  //   （真に値が 0 の週は "0.00" 表示が維持される。微小非ゼロ行のみ細かい桁へ揃う）。
+  // numFmt は値(式)書込の「後」に適用する（後段 Part② の式設定の直後に上書きするため順序OK）。
   const RUISAN_AVG_KEYS = ["power200v", "power100v", "reactivePower", "demand", "water", "diesel", "returnSludge", "excessSludge", "discharge"];
   const AVG_COL_FMT_BASE = 15; // O列
+  // numFmt 文字列から小数桁数を数える（"0.0000_ "→4, "0.00_);..."→2, General/空→Infinity=最細）
+  const avgFmtDecimals = (fmt) => {
+    if (!fmt || fmt === "General") return Infinity;
+    const m = String(fmt).match(/\.(0+)/);
+    return m ? m[1].length : 0;
+  };
   const ruisanAvgFmt = {};
   RUISAN_AVG_KEYS.forEach((key) => {
     const off = ITEM_OFFSETS[key];
     if (off == null) return;
-    const f = ws.getCell(DATA_ROW_BASE + off, AVG_COL_FMT_BASE).numFmt;
-    if (f) ruisanAvgFmt[key] = f;
+    let best = null, bestDec = -1;
+    for (let w = 1; w <= 5; w++) {
+      const fmt = ws.getCell(DATA_ROW_BASE + off + WEEK_OFFSETS[w], AVG_COL_FMT_BASE).numFmt;
+      const dec = avgFmtDecimals(fmt);
+      if (dec > bestDec) { bestDec = dec; best = (dec === Infinity) ? "General" : fmt; }
+    }
+    if (best) ruisanAvgFmt[key] = best;
   });
 
   // ===== 第1週I列: 前月最終点検日のデータを書き込む =====
@@ -5369,8 +5386,17 @@ function fillWaterSheet(ws, yyyy, mm, holidaySet) {
             formula: 'IFERROR((' + lastVal + '-' + firstVal + ')/(' + lastDate + '-' + firstDate + '),"")'
           };
         }
-        // 修正2(2026-06-05): 平均セルの数値書式を全5週で1週目に統一（微小値の 0.00 丸め回避）。式は不変。
-        if (ruisanAvgFmt[key]) ws.getCell(row, AVG_COL).numFmt = ruisanAvgFmt[key];
+        // 修正B(2026-06-06): 平均セルの数値書式を全5週で「最大小数桁」に統一（微小値の 0.00 丸め回避）。
+        // ★真因（修正2が取りこぼした理由）: ExcelJS は読込時に同一書式のセル群で style オブジェクトを
+        //   共有する。`cell.numFmt = x` はその共有 style を「破壊的に」書き換えるため、積算9項目×5週を
+        //   順に書き込むと、最後の代入が共有 style を上書きし、唯一2桁だった2週目 無効電力量(R52)が
+        //   兄弟セルの "0.00" に巻き戻って 0.00 化していた（単一セル単体テストでは露見しない）。
+        // 対策: numFmt 単独代入ではなく「セル固有の新しい style オブジェクト」を割り当てて共有を断つ。
+        //   value(式)→style の順序。value は style 代入で消えない（検証済）。真ゼロ行(2桁)は 0.00 維持。
+        if (ruisanAvgFmt[key]) {
+          const avgCell = ws.getCell(row, AVG_COL);
+          avgCell.style = Object.assign({}, avgCell.style, { numFmt: ruisanAvgFmt[key] });
+        }
       } else {
         // 測定値（水温/PH/透視度/SV/MLSS 等）の平均は従来どおり AVERAGE（J:N）。
         ws.getCell(row, AVG_COL).value = { formula: 'IFERROR(AVERAGE(J' + row + ':N' + row + '),"")' };
@@ -5421,6 +5447,11 @@ function fillWaterSheet(ws, yyyy, mm, holidaySet) {
     for (let di = 0; di < DASH_ROWS.length; di++) {
       ws.getCell(DASH_ROWS[di] + offset, AVG_COL).value = "-"; // U+002D
     }
+  }
+
+  // 修正A: 空の週ブロックは非表示。1ブロック=46行（自前タイトル R1-2 を含む）。週w = [(w-1)*46+1 .. +45]。
+  for (let w = 1; w <= 5; w++) {
+    if (waterWeekEmpty(w)) { const s = (w - 1) * 46 + 1; hideRowRange(ws, s, s + 45); }
   }
 }
 
@@ -5742,6 +5773,61 @@ function equipDayHasData(wData, dk) {
   return false;
 }
 
+// ===== 修正A(2026-06-06): 空の週ブロックは出力しない（週報系4シート: 機器運転時間/日常水質/日常機械設備/日常電気設備） =====
+// 「その週の全曜日でデータが1つも無い」週ブロックを、行非表示(row.hidden=true)で出力に出さない。
+// 物理削除はしない（テンプレ固定位置・集計数式・他週ブロックがずれて壊れるため）。
+// 各シートの週ブロックは「自前の見出し（タイトル・日付ヘッダ）」を含む完結した固定行範囲（stride）で
+// 繰り返す構成のため、ブロック全行を非表示にしてよい（共有の見出しは無い）。
+// 印刷: テンプレに手動改ページ(rowBreaks) は無く、改ページは内容高さで自然発生。非表示行は高さ0で
+//   ページ占有しないため、空ブロックを隠しても空白ページ/ギャップは発生しない（後続週が繰り上がる）。
+const DAYS5 = ["mon", "tue", "wed", "thu", "fri"];
+function hideRowRange(ws, start, end) {
+  for (let r = start; r <= end; r++) ws.getRow(r).hidden = true;
+}
+function dayInTargetMonth(w, dk, yyyy, mm) {
+  const dt = getActualDate(w, dk);
+  return !!(dt && dt.getFullYear() === yyyy && (dt.getMonth() + 1) === mm);
+}
+// 機器運転時間: 対象月内の平日に機器運転データが1つも無ければ空
+function equipWeekEmpty(w, yyyy, mm) {
+  const wData = weeklyData.equipment[w];
+  for (const dk of DAYS5) {
+    if (dayInTargetMonth(w, dk, yyyy, mm) && equipDayHasData(wData, dk)) return false;
+  }
+  return true;
+}
+// 日常電気設備: 電気点検データ + 日常水質由来の積算(返送/余剰/放流)も含めて判定（電気シートはこれらも書き込むため）
+function elecWeekEmpty(w, yyyy, mm) {
+  const wData = weeklyData.electrical[w];
+  for (const dk of DAYS5) {
+    if (!dayInTargetMonth(w, dk, yyyy, mm)) continue;
+    const day = wData && wData[dk];
+    if (day) { for (const k in day) { const v = day[k]; if (v !== null && v !== undefined && v !== "") return false; } }
+    const wDay = weeklyData.weeks[w] && weeklyData.weeks[w][dk];
+    if (wDay) { for (const k of ["returnSludge", "excessSludge", "discharge"]) { const v = wDay[k]; if (v !== null && v !== undefined && v !== "") return false; } }
+  }
+  return true;
+}
+// 日常機械設備: 対象月内の平日に機械点検データが1つも無ければ空
+function mechWeekEmpty(w, yyyy, mm) {
+  const wData = weeklyData.mechanical[w];
+  for (const dk of DAYS5) {
+    if (!dayInTargetMonth(w, dk, yyyy, mm)) continue;
+    const day = wData && wData[dk];
+    if (day) { for (const k in day) { const v = day[k]; if (v !== null && v !== undefined && v !== "") return false; } }
+  }
+  return true;
+}
+// 日常水質: 維持管理週報(運転読み値=積算)＋日常水質測定結果の両セクションを含めて判定。
+//   dayHasMeasurement は ALL_FIELDS（積算9項目＋測定値、inspector/bikou 除外）を走査するため両セクションを網羅。
+//   水質シートのデータ書込は月フィルタを掛けない（書けば必ず出る）ため、ここでも月フィルタ無しで「全曜日空」を判定。
+function waterWeekEmpty(w) {
+  for (const dk of DAYS5) {
+    if (dayHasMeasurement(weeklyData.weeks[w] && weeklyData.weeks[w][dk])) return false;
+  }
+  return true;
+}
+
 // 機器運転時間シート（加計浄化センター 21項目、29行ブロック）
 // ※対象月内の日付のみ書き込み（月跨ぎ日はスキップ）
 // ※A列・F列には週の開始・終了日付を令和形式で書き込む
@@ -5800,6 +5886,11 @@ function fillEquipSheet(ws, yyyy, mm) {
         setCell(ws, row, DAY_COL[dk], dayData[dk]);
       }
     });
+  }
+
+  // 修正A: 空の週ブロックは非表示。1ブロック=29行（自前タイトル R1 を含む）。週w = [(w-1)*29+1 .. +28]。
+  for (let w = 1; w <= 5; w++) {
+    if (equipWeekEmpty(w, yyyy, mm)) { const s = (w - 1) * 29 + 1; hideRowRange(ws, s, s + 28); }
   }
 }
 
@@ -5906,6 +5997,11 @@ function fillElecSheet(ws, yyyy, mm) {
       // 項目③: 点検者氏名(base+33=R36系) に月単位測定者を書く（電気データのある実測日のみ）
       if (inspName && hasElecData) setCell(ws, base + 33, col, inspName);
     }
+  }
+
+  // 修正A: 空の週ブロックは非表示。1ブロック=71行（自前タイトル R1 を含む）。週w = [(w-1)*71+1 .. +70]。
+  for (let w = 1; w <= 5; w++) {
+    if (elecWeekEmpty(w, yyyy, mm)) { const s = (w - 1) * 71 + 1; hideRowRange(ws, s, s + 70); }
   }
 }
 
@@ -6053,6 +6149,11 @@ function fillMechSheet(ws, yyyy, mm) {
         setCell(ws, wk.p2 + 2, col, inspName);
       }
     }
+  }
+
+  // 修正A: 空の週ブロックは非表示。1ブロック=132行（自前タイトル R1=page1, page2 含む）。週w = [(w-1)*132+1 .. +131]。
+  for (let w = 1; w <= 5; w++) {
+    if (mechWeekEmpty(w, yyyy, mm)) { const s = (w - 1) * 132 + 1; hideRowRange(ws, s, s + 131); }
   }
 }
 
