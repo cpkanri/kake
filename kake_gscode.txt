@@ -253,56 +253,17 @@ function computeMldoForMonth(month, recompute) {
       mldoLog.getRange(mldoLog.getLastRow() + 1, 1, newRows.length, 3).setValues(newRows);
     }
 
-    // ===== 水質管理報告シートN列（MLDO）へ反映（加計） =====
-    // 加計テンプレ構造: Row8〜Row38 がデータ行（31日分）、A列=日付、N列(=14列目)=MLDO
-    // 数式が入ったまま、または空のセルのみ固定値で上書き（月1回固定ルール・手動修正保護）
-    var reportSheet = ss.getSheetByName('水質管理報告');
-    var writtenToReport = 0;
-    var skippedLocked = 0;
-    var clearedReportCells = 0;
-    if (reportSheet) {
-      var dataRowStart = 8;
-      var dataRowCount = 31;
-      var mldoCol = 14; // N列
-      var dateRange = reportSheet.getRange(dataRowStart, 1, dataRowCount, 1).getValues();
-      // recompute（かつ当月データ有）: 当月の N列セルを先にクリア（手動修正値含め当月自動値を差し替え）
-      // ※ freshCount=0 のときはクリアしない（doRecompute=false）＝算出0件での消去によるデータ損失を防ぐ
-      if (doRecompute) {
-        for (var rk = 0; rk < dataRowCount; rk++) {
-          var rcStr = toDateStr(dateRange[rk][0]); // JST正規化
-          if (rcStr && rcStr.slice(0, 7) === month) { reportSheet.getRange(dataRowStart + rk, mldoCol).clearContent(); clearedReportCells++; }
-        }
-      }
-      var formulaRange = reportSheet.getRange(dataRowStart, mldoCol, dataRowCount, 1).getFormulas();
-      var valueRange = reportSheet.getRange(dataRowStart, mldoCol, dataRowCount, 1).getValues();
-      for (var k = 0; k < dataRowCount; k++) {
-        var cellDate = dateRange[k][0];
-        if (!cellDate) continue;
-        // toDateStr が Date / 文字列 / ISO を JST「YYYY-MM-DD」へ一貫正規化（日付一致の −1ズレ防止）
-        var cellDateStr = toDateStr(cellDate);
-        if (!cellDateStr || !(cellDateStr in existingDates)) continue;
-
-        var hasFormula = formulaRange[k][0] && formulaRange[k][0].toString().indexOf('=') === 0;
-        var curVal = valueRange[k][0];
-        var isEmpty = (curVal === '' || curVal === null || curVal === undefined);
-
-        if (hasFormula || isEmpty) {
-          reportSheet.getRange(dataRowStart + k, mldoCol).setValue(existingDates[cellDateStr]);
-          writtenToReport++;
-        } else {
-          // 既に固定値あり → 月1回ルール・手動修正保護のため上書きしない
-          skippedLocked++;
-        }
-      }
-    }
+    // ===== 水質管理報告シートへのミラー書込は廃止（2026-06-05） =====
+    // 旧設計では MLDO を SS「水質管理報告」N列にも写していたが、出力 Excel は
+    // テンプレ内ワークシートから生成され当該シートは読まれない（死蔵）。
+    // MLDO の一次ソースは MLDOログ／戻り値 values、出力は fillReportMldo（N列）で不変。
 
     var valuesCount = Object.keys(existingDates).length;
     // エディタ直接実行では戻り値(ContentService.TextOutput)が "{}" としか表示されないため、
     // 実行ログに要約を必ず残す（newlyComputed/values件数/異常検知をログで確認可能に）。
     Logger.log('[computeMldo] month=' + month + ' recompute=' + recompute + ' doRecompute=' + doRecompute
       + ' freshTempDays=' + freshCount + ' totalDates=' + dateKeys.length + ' newlyComputed=' + newRows.length
-      + ' clearedLogRows=' + clearedLogRows + ' clearedReportCells=' + clearedReportCells
-      + ' writtenToReport=' + writtenToReport + ' skippedLocked=' + skippedLocked
+      + ' clearedLogRows=' + clearedLogRows
       + ' valuesCount=' + valuesCount + ' anomalies=' + anomalies.length
       + (recompute && freshCount === 0 ? ' [GUARD] 当月ディッチ水温0件のためクリア/算出スキップ(データ損失防止)' : ''));
     return jsonResponse({
@@ -313,14 +274,10 @@ function computeMldoForMonth(month, recompute) {
       noFreshData: (recompute && freshCount === 0),
       freshTempDays: freshCount,
       clearedLogRows: clearedLogRows,
-      clearedReportCells: clearedReportCells,
       totalDates: dateKeys.length,
       newlyComputed: newRows.length,
-      writtenToReport: writtenToReport,
-      skippedLocked: skippedLocked,
       anomalies: anomalies,
       valuesCount: valuesCount,
-      reportSheetFound: !!reportSheet,
       values: existingDates
     });
   } catch (err) {

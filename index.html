@@ -4618,10 +4618,7 @@ function bindEvents() {
         try { safeSetItem('kake_mldo_' + weeklyData.targetMonth, JSON.stringify(cleanMldo)); }
         catch (e) { console.warn('MLDO値の保存に失敗:', e); }
       }
-      let msg = "MLDO計算完了：新規 " + (data.newlyComputed || 0) + " 件";
-      if (typeof data.writtenToReport === 'number') {
-        msg += "、水質管理報告に " + data.writtenToReport + " 件反映";
-      }
+      let msg = "MLDO計算完了：新規 " + (data.newlyComputed || 0) + " 件（MLDOログに反映）";
       showToast(msg, "success");
       await updateMldoStatus();
     } catch (e) {
