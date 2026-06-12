@@ -2382,6 +2382,61 @@ function findPrevDayWithData(sheetType, weekIdx, dayIdx, daysArr) {
   }
 }
 
+// ===== 前日コピーの前月対応（2026-06-12）=====
+// 当月内にコピー元が無い場合に、前月 localStorage（読み取り専用・サーバーフェッチなし）から
+// 同タブの最終データ日を探す。前月データが端末に無ければ null（従来どおりエラートースト）。
+function getPrevMonthCopySource(sheetType) {
+  try {
+    var tm = weeklyData.targetMonth;
+    if (!tm) return null;
+    var ym = tm.split("-");
+    var year = parseInt(ym[0], 10), month = parseInt(ym[1], 10);
+    if (isNaN(year) || isNaN(month)) return null;
+    var prevMonth = month === 1 ? (year - 1) + "-12" : year + "-" + String(month - 1).padStart(2, "0");
+    var raw = localStorage.getItem("kake_weekly_" + prevMonth);
+    if (!raw) return null;
+    var prev = JSON.parse(raw);
+    if (!prev) return null;
+    var days = sheetType === "water" ? ["mon", "tue", "wed", "thu", "fri"]
+             : sheetType === "mech" ? MECH_DAYS : EQUIP_DAYS;
+    var sec = sheetType === "water" ? prev.weeks
+            : sheetType === "equip" ? prev.equipment
+            : sheetType === "elec" ? prev.electrical : prev.mechanical;
+    if (!sec) return null;
+    var hasVal = function (v) { return v !== null && v !== undefined && v !== ""; };
+    var dayHasAny = function (w, d) {
+      if (sheetType === "equip") {
+        var wkE = sec[w];
+        if (!wkE) return false;
+        return Object.keys(wkE).some(function (k) { return wkE[k] && hasVal(wkE[k][d]); });
+      }
+      var wk = sec[w];
+      if (!wk || !wk[d]) return false;
+      var dd = wk[d];
+      if (sheetType === "water") return dayHasMeasurement(dd);
+      return Object.keys(dd).some(function (k) { return hasVal(dd[k]); });
+    };
+    for (var w = 5; w >= 1; w--) {
+      for (var i = days.length - 1; i >= 0; i--) {
+        var d = days[i];
+        if (!dayHasAny(w, d)) continue;
+        var label = "前月";
+        if (prev.startDate) {
+          var base = new Date(prev.startDate + "T00:00:00");
+          if (!isNaN(base.getTime())) {
+            var om = { mon: 0, tue: 1, wed: 2, thu: 3, fri: 4, nextMon: 4 };
+            var dt = new Date(base);
+            dt.setDate(base.getDate() + (w - 1) * 7 + (om[d] || 0));
+            label = "前月" + (dt.getMonth() + 1) + "/" + dt.getDate() + "(" + ["日", "月", "火", "水", "木", "金", "土"][dt.getDay()] + ")";
+          }
+        }
+        return { week: w, day: d, prevData: prev, label: label };
+      }
+    }
+    return null;
+  } catch (e) { return null; }
+}
+
 // ===== 未保存マーカー =====
 let isDirty = false;
 function markDirty() {
@@ -4329,12 +4384,20 @@ function bindEvents() {
       const order = ["mon", "tue", "wed", "thu", "fri"];
       const idx = order.indexOf(currentDay);
       const found = findPrevDayWithData("water", currentWeek, idx, order);
-      if (!found) {
-        showToast("コピー元のデータがありません", "error");
-        return;
+      let src, srcLabel;
+      if (found) {
+        srcLabel = (found.week !== currentWeek ? "第" + found.week + "週" : "") + (DAY_LABELS[found.day] || found.day);
+        src = weeklyData.weeks[found.week][found.day];
+      } else {
+        // 2026-06-12: 当月内にコピー元なし → 前月 localStorage の最終データ日から（読み取り専用）
+        const pm = getPrevMonthCopySource("water");
+        if (!pm) {
+          showToast("コピー元のデータがありません", "error");
+          return;
+        }
+        src = pm.prevData.weeks[pm.week][pm.day];
+        srcLabel = pm.label;
       }
-      const srcLabel = (found.week !== currentWeek ? "第" + found.week + "週" : "") + (DAY_LABELS[found.day] || found.day);
-      const src = weeklyData.weeks[found.week][found.day];
       const dst = weeklyData.weeks[currentWeek][currentDay];
       COPY_FIELDS.forEach(k => { dst[k] = src[k]; });
       loadDataToForm();
@@ -4351,9 +4414,31 @@ function bindEvents() {
     else if (currentSheet === "mech") saveMechFormToData();
 
     let anyCopied = false;
+    let usedPrevMonthLabel = null;
     daysArr.forEach((tgtDay, tgtIdx) => {
       const found = findPrevDayWithData(currentSheet, currentWeek, tgtIdx, daysArr);
-      if (!found) return;
+      if (!found) {
+        // 2026-06-12: 当月内にコピー元なし → 前月 localStorage の最終データ日から（読み取り専用）
+        const pm = getPrevMonthCopySource(currentSheet);
+        if (!pm) return;
+        if (currentSheet === "equip") {
+          const pwk = pm.prevData.equipment[pm.week] || {};
+          EQUIP_KEYS.forEach(k => {
+            weeklyData.equipment[currentWeek][k][tgtDay] = pwk[k] ? pwk[k][pm.day] : null;
+          });
+        } else if (currentSheet === "elec") {
+          const srcP = pm.prevData.electrical[pm.week][pm.day];
+          const dstP = weeklyData.electrical[currentWeek][tgtDay];
+          ALL_ELEC_KEYS.forEach(k => { dstP[k] = srcP[k]; });
+        } else if (currentSheet === "mech") {
+          const srcP = pm.prevData.mechanical[pm.week][pm.day];
+          const dstP = weeklyData.mechanical[currentWeek][tgtDay];
+          ALL_MECH_KEYS.forEach(k => { dstP[k] = srcP[k]; });
+        }
+        anyCopied = true;
+        usedPrevMonthLabel = pm.label;
+        return;
+      }
       if (currentSheet === "equip") {
         EQUIP_KEYS.forEach(k => {
           weeklyData.equipment[currentWeek][k][tgtDay] = weeklyData.equipment[found.week][k][found.day];
@@ -4375,7 +4460,9 @@ function bindEvents() {
     else if (currentSheet === "mech") loadMechDataToForm();
     updateEquipWeekTabs(); updateElecWeekTabs(); updateMechWeekTabs();
     markDirty();
-    showToast("各曜日に前日データを反映しました（空日はスキップ）");
+    showToast(usedPrevMonthLabel
+      ? "各曜日に前日データを反映しました（" + usedPrevMonthLabel + "から含む・空日はスキップ）"
+      : "各曜日に前日データを反映しました（空日はスキップ）");
   });
 
   // 列コピー共通関数（テーブル形式タブ用: ← ボタンから呼ばれる・空日スキップ）
@@ -4384,16 +4471,28 @@ function bindEvents() {
     const idx = daysArr.indexOf(targetDay);
     if (idx < 0) return;
     const found = findPrevDayWithData(tableType, currentWeek, idx, daysArr);
-    if (!found) {
-      showToast("コピー元のデータがありません", "error");
-      return;
+    // 2026-06-12: 当月内にコピー元なし → 前月 localStorage の最終データ日から（読み取り専用）
+    let srcLabel, srcWeekData, srcEquipWeek, pm = null;
+    if (found) {
+      srcLabel = (found.week !== currentWeek ? "第" + found.week + "週" : "") + (DAY_LABELS[found.day] || found.day);
+    } else {
+      pm = getPrevMonthCopySource(tableType);
+      if (!pm) {
+        showToast("コピー元のデータがありません", "error");
+        return;
+      }
+      srcLabel = pm.label;
+      if (tableType === "equip") srcEquipWeek = pm.prevData.equipment[pm.week] || {};
+      else if (tableType === "elec") srcWeekData = pm.prevData.electrical[pm.week][pm.day];
+      else if (tableType === "mech") srcWeekData = pm.prevData.mechanical[pm.week][pm.day];
     }
-    const srcLabel = (found.week !== currentWeek ? "第" + found.week + "週" : "") + (DAY_LABELS[found.day] || found.day);
 
     if (tableType === "equip") {
       saveEquipFormToData();
       EQUIP_KEYS.forEach(k => {
-        weeklyData.equipment[currentWeek][k][targetDay] = weeklyData.equipment[found.week][k][found.day];
+        weeklyData.equipment[currentWeek][k][targetDay] = found
+          ? weeklyData.equipment[found.week][k][found.day]
+          : (srcEquipWeek[k] ? srcEquipWeek[k][pm.day] : null);
       });
       loadEquipDataToForm();
       document.querySelectorAll('#equipTable [data-eday="' + targetDay + '"]').forEach(el => {
@@ -4401,7 +4500,7 @@ function bindEvents() {
       });
     } else if (tableType === "elec") {
       saveElecFormToData();
-      const srcData = weeklyData.electrical[found.week][found.day];
+      const srcData = found ? weeklyData.electrical[found.week][found.day] : srcWeekData;
       const dstData = weeklyData.electrical[currentWeek][targetDay];
       ALL_ELEC_KEYS.forEach(k => { dstData[k] = srcData[k]; });
       loadElecDataToForm();
@@ -4410,7 +4509,7 @@ function bindEvents() {
       });
     } else if (tableType === "mech") {
       saveMechFormToData();
-      const srcData = weeklyData.mechanical[found.week][found.day];
+      const srcData = found ? weeklyData.mechanical[found.week][found.day] : srcWeekData;
       const dstData = weeklyData.mechanical[currentWeek][targetDay];
       ALL_MECH_KEYS.forEach(k => { dstData[k] = srcData[k]; });
       loadMechDataToForm();
@@ -6423,51 +6522,75 @@ function scrollToTopThird(el) {
 
 // 次のフィールドを選ぶ（縦方向）
 // 現在のシートに応じてフィールドリストを生成
+// ===== 入力フォーカス巡回（2026-06-12 仕様統一）=====
+// 巡回対象: テキスト/数値 input のみ（トグルボタン・select・disabled/readonly/非表示はスキップ）。
+// 順序: 同一日（曜日タブ/列）内を上→下 → 最下端で同週内の次の日の最上端へ。
+// 週内最終日の最下端では移動しない（週またぎなし・フォーカス維持）。
+function _isAdvanceTarget(el) {
+  if (!el || el.tagName !== "INPUT") return false;
+  if (el.type !== "number" && el.type !== "text") return false;
+  if (el.disabled || el.readOnly) return false;
+  if (el.offsetParent === null) return false; // display:none 等の非表示
+  return true;
+}
 function getAdvanceableFields() {
   if (currentSheet === "water") {
-    return Array.from(document.querySelectorAll('#waterPanel input[data-field], #waterPanel button[data-field].toggle-btn'));
+    // 水質タブは1画面=1曜日のため、表示中 input 全部が「同一日」
+    return Array.from(document.querySelectorAll('#waterPanel input[data-field]')).filter(_isAdvanceTarget);
   } else if (currentSheet === "equip") {
     const result = [];
-    const days = ["mon", "tue", "wed", "thu", "fri"];
-    days.forEach(d => {
-      document.querySelectorAll('#equipPanel input[data-equip][data-eday="' + d + '"]').forEach(el => result.push(el));
+    EQUIP_DAYS.forEach(d => {
+      document.querySelectorAll('#equipPanel input[data-equip][data-eday="' + d + '"]').forEach(el => { if (_isAdvanceTarget(el)) result.push(el); });
     });
     return result;
   } else if (currentSheet === "elec") {
     const result = [];
-    const days = ["mon", "tue", "wed", "thu", "fri"];
-    days.forEach(d => {
-      // Phase 17: readonly な使用量自動計算セルは Enter ナビゲーション対象から除外
-      document.querySelectorAll('#elecPanel input[data-elec][data-eday="' + d + '"]:not([data-autocalc]), #elecPanel button[data-elec][data-eday="' + d + '"].toggle-btn').forEach(el => result.push(el));
+    EQUIP_DAYS.forEach(d => {
+      // Phase 17: readonly な使用量自動計算セルは巡回対象から除外（:not([data-autocalc]) 維持）
+      document.querySelectorAll('#elecPanel input[data-elec][data-eday="' + d + '"]:not([data-autocalc])').forEach(el => { if (_isAdvanceTarget(el)) result.push(el); });
     });
     return result;
   } else if (currentSheet === "mech") {
     const result = [];
-    const days = ["mon", "tue", "wed", "thu", "fri"];
-    days.forEach(d => {
-      document.querySelectorAll('#mechPanel input[data-mech][data-mday="' + d + '"], #mechPanel button[data-mech][data-mday="' + d + '"].toggle-btn').forEach(el => result.push(el));
+    MECH_DAYS.forEach(d => {
+      document.querySelectorAll('#mechPanel input[data-mech][data-mday="' + d + '"]').forEach(el => { if (_isAdvanceTarget(el)) result.push(el); });
     });
     return result;
   }
   return [];
 }
 
-// 次のフィールドに進む
-function advanceToNextField(currentEl) {
+function _focusAdvanceField(next) {
+  next.focus();
+  setTimeout(() => scrollToTopThird(next), 50);
+  try { next.select(); } catch (e) {}
+}
+
+// 次のフィールドに進む。
+// allowDaySwitch: 水質タブ最下端での「次の曜日タブへ自動切替」を許可するか（Enter 等の明示操作で true）。
+function advanceToNextField(currentEl, allowDaySwitch) {
+  if (allowDaySwitch === undefined) allowDaySwitch = true;
   const fields = getAdvanceableFields();
   const idx = fields.indexOf(currentEl);
   if (idx < 0) return;
 
   const next = fields[idx + 1];
   if (next) {
-    next.focus();
-    setTimeout(() => scrollToTopThird(next), 50);
-    if (next.tagName === 'INPUT' && (next.type === 'number' || next.type === 'text')) {
-      try { next.select(); } catch(e) {}
-    }
-  } else {
-    currentEl.blur();
+    _focusAdvanceField(next);
+    return;
   }
+  // 最下端到達。水質タブ（曜日タブ型）は次の曜日タブへ自動切替（switchTo 経由＝既存の保存→ロードフロー）。
+  if (currentSheet === "water" && allowDaySwitch) {
+    const order = ["mon", "tue", "wed", "thu", "fri"];
+    const di = order.indexOf(currentDay);
+    if (di >= 0 && di < order.length - 1) {
+      switchTo(currentWeek, order[di + 1]);
+      const nf = getAdvanceableFields()[0];
+      if (nf) _focusAdvanceField(nf);
+    }
+    return; // 週内最終日（金）は移動しない
+  }
+  // テーブル系はフラット配列が日順のため next 無し = 週内最終日の最下端 → 移動しない（フォーカス維持）
 }
 
 // inputタップ時に全選択＋スクロール＋記録
@@ -6512,7 +6635,12 @@ document.addEventListener("focusout", function(e) {
     if (active && (active.tagName === "BUTTON" || active.tagName === "SELECT")) {
       return;
     }
-    // 次のinputにフォーカス（テーブルなら縦方向）
+    // 2026-06-12: タブ内 input は統一巡回（上→下→次の日）。曜日タブ自動切替は blur 由来では行わない。
+    if (getAdvanceableFields().indexOf(blurredInput) >= 0) {
+      advanceToNextField(blurredInput, false);
+      return;
+    }
+    // タブ外 input は従来どおり
     var next = getNextInput(blurredInput);
     if (next) {
       next.focus();
@@ -6522,10 +6650,15 @@ document.addEventListener("focusout", function(e) {
   }, 50);
 });
 
-// PCのEnterキーで次のinputに移動（テーブルなら縦方向）
+// PCのEnterキーで次のinputに移動
 document.addEventListener("keydown", function(e) {
   if (e.key === "Enter" && e.target.tagName === "INPUT") {
     e.preventDefault();
+    // 2026-06-12: タブ内 input は統一巡回（上→下→次の日。水質は曜日タブ自動切替）
+    if (getAdvanceableFields().indexOf(e.target) >= 0) {
+      advanceToNextField(e.target, true);
+      return;
+    }
     var next = getNextInput(e.target);
     if (next) {
       next.focus();
