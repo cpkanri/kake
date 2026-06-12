@@ -5340,6 +5340,14 @@ function fillWaterSheet(ws, yyyy, mm, holidaySet) {
         }
         setCell(ws, row, targetCol, v);
       }
+      // 塩素投入量(offset 33 = R37): 点検日(実測あり・非祝日)で未入力なら 0 を値で書く
+      // （=投入なし 0kg、kamitono v85 横展開）。祝日・点検なし日は空欄維持。
+      // 0/数値の入力日は上の setCell が値書込済み。O列平均は既存 IFERROR(AVERAGE(J:N)) が処理。
+      const _chlor = day.chlorineDose;
+      if (!isHolDk && dayHasMeasurement(day) &&
+          (_chlor === null || _chlor === undefined || _chlor === "")) {
+        ws.getCell(dataRowBase + 33, colMeasure).value = 0;
+      }
       // 測定者: 測定場所テーブル所属なのでJ列起点
       if (day.inspector) setCell(ws, inspRow, colMeasure, day.inspector);
     }
