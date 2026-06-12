@@ -53,7 +53,7 @@ header h1 {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  flex: 1;
+  flex: 0 1 auto;          /* ヘッダーv2: 全幅化を止めてコンパクトに（筒賀・吉和準拠） */
   min-width: 130px;
 }
 .header-controls label span { opacity: 0.85; }
@@ -750,17 +750,7 @@ body.login-active {
   overflow: hidden;
 }
 
-/* ===== ログアウトボタン ===== */
-.user-info {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  font-size: 11px;
-  color: rgba(255,255,255,0.9);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
+/* ===== ログアウトボタン =====（旧 absolute 配置の .user-info はヘッダーv2 で削除） */
 .btn-logout {
   background: rgba(255,255,255,0.2);
   color: white;
@@ -821,30 +811,15 @@ body.login-active {
   50% { box-shadow: 0 4px 16px rgba(255,111,0,0.7); }
 }
 
-/* ===== ヘッダー上部: タイトルとユーザー情報を横並び ===== */
-.header-top {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 10px;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.header-top h1 {
-  margin: 0;
-  font-size: 18px;
-  flex: 1 1 auto;
-  min-width: 200px;
-}
-
-/* ユーザー情報エリア（上書き）: 接続状態 + ユーザー名 + ログアウト */
-header .user-info {
-  position: static;
+/* ===== ヘッダーv2 (2026-06-13): user-info を対象年月の行の右端へ（5アプリ統一） =====
+   狭幅時は flex-wrap により対象年月の下へ折り返す（メディアクエリ非依存） */
+.header-controls .user-info {
+  margin-left: auto;       /* 右端へ寄せる */
   display: flex;
   align-items: center;
   gap: 10px;
-  flex-wrap: nowrap;
   font-size: 13px;
+  margin-bottom: 5px;      /* 📅ボタンと垂直中心が揃うよう微調整 */
 }
 
 /* インライン接続状態 */
@@ -922,17 +897,10 @@ header > .conn-status {
 
 /* スマホ対応: 狭い画面でヘッダーアクションを縦並びに */
 /* Phase 11-F-CSS-2: 4 ボタン構成のため 2 列 × 2 行で折り返す。Excel ボタンの span は不要 */
+/* ヘッダーv2: header-top/user-info の縦並びルールは flex-wrap 折返しへ移行し削除 */
 @media (max-width: 480px) {
   .header-actions {
     grid-template-columns: 1fr 1fr;
-  }
-  .header-top {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-  header .user-info {
-    width: 100%;
-    justify-content: flex-end;
   }
 }
 
@@ -1094,9 +1062,15 @@ input[type="number"] {
 </div>
 
 <!-- ヘッダー -->
-<header style="position: relative;">
-  <div class="header-top">
-    <h1>加計浄化センター 週報入力</h1>
+<header>
+  <!-- ヘッダーv2 (2026-06-13): user-info を対象年月の行の右端へ（1行分コンパクト化・5アプリ統一） -->
+  <h1>加計浄化センター 週報入力</h1>
+  <div class="header-controls">
+    <label>
+      <span>対象年月</span>
+      <input type="month" id="targetMonth" style="display:none">
+      <button type="button" id="btnTargetMonth" class="btn-header-action">📅 ----</button>
+    </label>
     <div class="user-info" id="userInfo" style="display:none;">
       <div class="conn-status-inline" id="connStatus">
         <span class="conn-dot" id="connDot"></span>
@@ -1105,13 +1079,6 @@ input[type="number"] {
       <span class="user-name" id="userName"></span>
       <button type="button" class="btn-logout" id="btnLogout">ログアウト</button>
     </div>
-  </div>
-  <div class="header-controls">
-    <label>
-      <span>対象年月</span>
-      <input type="month" id="targetMonth" style="display:none">
-      <button type="button" id="btnTargetMonth" class="btn-header-action">📅 ----</button>
-    </label>
   </div>
   <!-- Phase 17 ヘッダー B デザイン: 2 グループ統一 -->
   <div class="header-btn-area">
