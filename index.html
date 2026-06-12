@@ -6522,38 +6522,43 @@ function scrollToTopThird(el) {
 
 // 次のフィールドを選ぶ（縦方向）
 // 現在のシートに応じてフィールドリストを生成
-// ===== 入力フォーカス巡回（2026-06-12 仕様統一）=====
-// 巡回対象: テキスト/数値 input のみ（トグルボタン・select・disabled/readonly/非表示はスキップ）。
-// 順序: 同一日（曜日タブ/列）内を上→下 → 最下端で同週内の次の日の最上端へ。
-// 週内最終日の最下端では移動しない（週またぎなし・フォーカス維持）。
+// ===== 入力フォーカス巡回（2026-06-12 仕様統一 / 同日修正: トグル・selectにも止まる＋週末は次週へ）=====
+// 巡回対象: text/number input ＋ トグルボタン ＋ select（disabled/readonly/非表示・autocalc はスキップ）。
+// 順序: 同一日（曜日タブ/列）内を上→下 → 最下端で同週内の次の日の最上端へ →
+// 週内最終日の最下端は次週の最初の日の先頭へ（第5週=月内最終週では停止・月またぎなし）。
 function _isAdvanceTarget(el) {
-  if (!el || el.tagName !== "INPUT") return false;
-  if (el.type !== "number" && el.type !== "text") return false;
-  if (el.disabled || el.readOnly) return false;
+  if (!el || el.disabled) return false;
   if (el.offsetParent === null) return false; // display:none 等の非表示
-  return true;
+  if (el.tagName === "INPUT") {
+    if (el.type !== "number" && el.type !== "text") return false;
+    if (el.readOnly) return false;
+    return true;
+  }
+  if (el.tagName === "SELECT") return true;
+  if (el.tagName === "BUTTON" && el.classList && el.classList.contains("toggle-btn")) return true;
+  return false;
 }
 function getAdvanceableFields() {
   if (currentSheet === "water") {
-    // 水質タブは1画面=1曜日のため、表示中 input 全部が「同一日」
-    return Array.from(document.querySelectorAll('#waterPanel input[data-field]')).filter(_isAdvanceTarget);
+    // 水質タブは1画面=1曜日のため、表示中の対象全部が「同一日」（複合セレクタ=DOM 順）
+    return Array.from(document.querySelectorAll('#waterPanel input[data-field], #waterPanel button[data-field].toggle-btn, #waterPanel select[data-field]')).filter(_isAdvanceTarget);
   } else if (currentSheet === "equip") {
     const result = [];
     EQUIP_DAYS.forEach(d => {
-      document.querySelectorAll('#equipPanel input[data-equip][data-eday="' + d + '"]').forEach(el => { if (_isAdvanceTarget(el)) result.push(el); });
+      document.querySelectorAll('#equipPanel input[data-equip][data-eday="' + d + '"], #equipPanel button[data-equip][data-eday="' + d + '"].toggle-btn, #equipPanel select[data-equip][data-eday="' + d + '"]').forEach(el => { if (_isAdvanceTarget(el)) result.push(el); });
     });
     return result;
   } else if (currentSheet === "elec") {
     const result = [];
     EQUIP_DAYS.forEach(d => {
       // Phase 17: readonly な使用量自動計算セルは巡回対象から除外（:not([data-autocalc]) 維持）
-      document.querySelectorAll('#elecPanel input[data-elec][data-eday="' + d + '"]:not([data-autocalc])').forEach(el => { if (_isAdvanceTarget(el)) result.push(el); });
+      document.querySelectorAll('#elecPanel input[data-elec][data-eday="' + d + '"]:not([data-autocalc]), #elecPanel button[data-elec][data-eday="' + d + '"].toggle-btn, #elecPanel select[data-elec][data-eday="' + d + '"]').forEach(el => { if (_isAdvanceTarget(el)) result.push(el); });
     });
     return result;
   } else if (currentSheet === "mech") {
     const result = [];
     MECH_DAYS.forEach(d => {
-      document.querySelectorAll('#mechPanel input[data-mech][data-mday="' + d + '"]').forEach(el => { if (_isAdvanceTarget(el)) result.push(el); });
+      document.querySelectorAll('#mechPanel input[data-mech][data-mday="' + d + '"], #mechPanel button[data-mech][data-mday="' + d + '"].toggle-btn, #mechPanel select[data-mech][data-mday="' + d + '"]').forEach(el => { if (_isAdvanceTarget(el)) result.push(el); });
     });
     return result;
   }
@@ -6563,11 +6568,21 @@ function getAdvanceableFields() {
 function _focusAdvanceField(next) {
   next.focus();
   setTimeout(() => scrollToTopThird(next), 50);
-  try { next.select(); } catch (e) {}
+  if (next.tagName === 'INPUT' && (next.type === 'number' || next.type === 'text')) {
+    try { next.select(); } catch (e) {}
+  }
+}
+
+// テーブル系タブの次週切替（既存の週タブクリックハンドラと同一フロー: 保存→週変更→タブ更新→ロード）
+function _switchTableWeekForAdvance(nextWeek) {
+  if (currentSheet === "equip") { saveEquipFormToData(); currentWeek = nextWeek; loadEquipDataToForm(); }
+  else if (currentSheet === "elec") { saveElecFormToData(); currentWeek = nextWeek; loadElecDataToForm(); }
+  else if (currentSheet === "mech") { saveMechFormToData(); currentWeek = nextWeek; loadMechDataToForm(); }
+  updateWeekTabs(); updateEquipWeekTabs(); updateElecWeekTabs(); updateMechWeekTabs();
 }
 
 // 次のフィールドに進む。
-// allowDaySwitch: 水質タブ最下端での「次の曜日タブへ自動切替」を許可するか（Enter 等の明示操作で true）。
+// allowDaySwitch: 最下端での「次の曜日/次週への自動切替」を許可するか（Enter 等の明示操作で true）。
 function advanceToNextField(currentEl, allowDaySwitch) {
   if (allowDaySwitch === undefined) allowDaySwitch = true;
   const fields = getAdvanceableFields();
@@ -6579,18 +6594,28 @@ function advanceToNextField(currentEl, allowDaySwitch) {
     _focusAdvanceField(next);
     return;
   }
-  // 最下端到達。水質タブ（曜日タブ型）は次の曜日タブへ自動切替（switchTo 経由＝既存の保存→ロードフロー）。
-  if (currentSheet === "water" && allowDaySwitch) {
+  // 最下端到達。blur 由来では曜日/週の切替をしない（フォーカス維持）。
+  if (!allowDaySwitch) return;
+  if (currentSheet === "water") {
     const order = ["mon", "tue", "wed", "thu", "fri"];
     const di = order.indexOf(currentDay);
     if (di >= 0 && di < order.length - 1) {
-      switchTo(currentWeek, order[di + 1]);
-      const nf = getAdvanceableFields()[0];
-      if (nf) _focusAdvanceField(nf);
+      switchTo(currentWeek, order[di + 1]);          // 同週内の次の曜日
+    } else if (currentWeek < 5) {
+      switchTo(currentWeek + 1, order[0]);            // 週内最終日 → 次週の最初の日
+    } else {
+      return;                                         // 第5週（月内最終週）→ 停止
     }
-    return; // 週内最終日（金）は移動しない
+    const nf = getAdvanceableFields()[0];
+    if (nf) _focusAdvanceField(nf);
+    return;
   }
-  // テーブル系はフラット配列が日順のため next 無し = 週内最終日の最下端 → 移動しない（フォーカス維持）
+  // テーブル系: グリッド末尾（=週の終端）→ 次週グリッドの先頭へ。第5週は停止。
+  if (currentWeek < 5) {
+    _switchTableWeekForAdvance(currentWeek + 1);
+    const nf = getAdvanceableFields()[0];
+    if (nf) _focusAdvanceField(nf);
+  }
 }
 
 // inputタップ時に全選択＋スクロール＋記録
@@ -6650,23 +6675,25 @@ document.addEventListener("focusout", function(e) {
   }, 50);
 });
 
-// PCのEnterキーで次のinputに移動
+// PCのEnterキーで次のフィールドに移動
 document.addEventListener("keydown", function(e) {
-  if (e.key === "Enter" && e.target.tagName === "INPUT") {
+  if (e.key !== "Enter" || !e.target) return;
+  // 2026-06-12 修正: タブ内の巡回対象（input/トグルボタン/select）は統一巡回。
+  // トグル上の Enter は preventDefault でクリック発火（値切替）を防ぎ、次の項目へ移動のみ行う。
+  if (getAdvanceableFields().indexOf(e.target) >= 0) {
     e.preventDefault();
-    // 2026-06-12: タブ内 input は統一巡回（上→下→次の日。水質は曜日タブ自動切替）
-    if (getAdvanceableFields().indexOf(e.target) >= 0) {
-      advanceToNextField(e.target, true);
-      return;
-    }
-    var next = getNextInput(e.target);
-    if (next) {
-      next.focus();
-      try { next.select(); } catch(_){}
-      setTimeout(function() { scrollToTopThird(next); }, 50);
-    } else {
-      e.target.blur();
-    }
+    advanceToNextField(e.target, true);
+    return;
+  }
+  if (e.target.tagName !== "INPUT") return;
+  e.preventDefault();
+  var next = getNextInput(e.target);
+  if (next) {
+    next.focus();
+    try { next.select(); } catch(_){}
+    setTimeout(function() { scrollToTopThird(next); }, 50);
+  } else {
+    e.target.blur();
   }
 });
 
