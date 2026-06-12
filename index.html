@@ -2616,8 +2616,8 @@ function buildElecTable() {
         if (v === '' || v === null || v === undefined) {
           wk[day][key] = null;
         } else {
-          const num = Number(v);
-          wk[day][key] = isNaN(num) ? v : num;
+          // 2026-06-12 B方式: raw 文字列で保持（Number 化は末尾0 "16.0"→16 を破壊。saveElecFormToData と同方針）
+          wk[day][key] = v;
         }
       }
       recomputeElecAutoCalcCell(day, key);
@@ -4202,7 +4202,8 @@ function bindEvents() {
       const day = weeklyData.weeks[currentWeek][currentDay];
       const key = el.dataset.field;
       if (el.type === "number") {
-        day[key] = el.value === "" ? null : Number(el.value);
+        // 2026-06-12 B方式: raw 文字列で保持（Number 化は末尾0 "16.0"→16 を破壊）
+        day[key] = el.value === "" ? null : el.value;
       } else if (key === "bikou") {
         day[key] = sanitizeBikou(el.value);
       } else {
@@ -4906,7 +4907,10 @@ function writeElecEmptyCell(ws, row, col, date) {
   cell.numFmt = "@";
 }
 
-function setCell(ws, row, col, val, preserveTypedDecimals) {
+// 2026-06-12 B方式: preserveTypedDecimals フラグを撤廃し、指示書1(3)仕様＝kamitono v87 と同一の
+// 「General セルのみ小数桁 numFmt 付与（テンプレ書式優先）」を常時適用。共有 style 破壊防止のため
+// 新 style オブジェクト割当（Object.assign）で行う。
+function setCell(ws, row, col, val) {
   if (val === null || val === undefined || val === "") return;
   const cell = ws.getCell(row, col);
   if (typeof val === "number") { cell.value = val; return; }
@@ -4914,10 +4918,9 @@ function setCell(ws, row, col, val, preserveTypedDecimals) {
   const num = Number(s);
   if (!isNaN(num) && s !== "" && /^-?\d+(\.\d+)?$/.test(s)) {
     cell.value = num; // 数値型のまま（テンプレ集計式・按分を壊さない）
-    if (preserveTypedDecimals) {
-      const dot = s.indexOf(".");
-      const dec = dot >= 0 ? (s.length - dot - 1) : 0;
-      if (dec > 0) cell.numFmt = "0." + "0".repeat(dec); // 入力小数桁ぶんだけ表示（四捨五入なし、整数は触らない）
+    const decM = s.match(/\.(\d+)$/);
+    if (decM && (!cell.numFmt || cell.numFmt === "General")) {
+      cell.style = Object.assign({}, cell.style, { numFmt: "0." + "0".repeat(decM[1].length) });
     }
   } else {
     cell.value = formatHyphenForOutput(val);
@@ -6264,7 +6267,7 @@ function fillMechSheet(ws, yyyy, mm) {
         if (val1 === null || val1 === undefined || val1 === "") {
           writeMechEmptyCell(ws, row1, col, key, val1, actual);
         } else {
-          setCell(ws, row1, col, val1, true);
+          setCell(ws, row1, col, val1);
         }
       }
       // 2/2 ページ: 絶対行(週1基準) + (wk.p2 - 66) で各週の page2 ブロックへ
@@ -6274,7 +6277,7 @@ function fillMechSheet(ws, yyyy, mm) {
         if (val2 === null || val2 === undefined || val2 === "") {
           writeMechEmptyCell(ws, row2, col, key, val2, actual);
         } else {
-          setCell(ws, row2, col, val2, true);
+          setCell(ws, row2, col, val2);
         }
       }
       // 点検者(測定者名): 実測日列のみ。点検者行は page1=wk.p1+2(C2系) / page2=wk.p2+2(C68系)、

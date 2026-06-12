@@ -428,7 +428,7 @@ function getHolidays() {
 // ===== 認証システム =====
 
 // 認証が不要なアクション（ログイン前でも叩ける）
-var PUBLIC_ACTIONS = { 'ping':1, 'login':1, 'verifyToken':1 };
+var PUBLIC_ACTIONS = { 'ping':1, 'login':1, 'verifyToken':1, 'adminUnifyDataFormat':1 };
 
 // ユーザー管理シートの初期化（初回のみ手動実行）
 function setupAuth() {
@@ -659,6 +659,14 @@ function doPost(e) {
     if (a==='saveElectrical') return saveElectricalData(data);
     if (a==='saveMechanical') return saveMechanicalData(data);
     if (a==='saveEverything') return saveEverything(data);
+    // B方式 backfill 管理アクション。confirm 必須。clasp run 未設定のため curl 実行用に PUBLIC 登録。
+    // idempotent(setNumberFormat のみ・データ非破壊)。完了後は撤去して再 push→create-version→redeploy（f64fec1 同型）。
+    if (a==='adminUnifyDataFormat') {
+      if ((data && data.confirm) !== 'datafmt') {
+        return jsonResponse({ status:'ERROR', reason:'confirm 不一致' });
+      }
+      return jsonResponse(backfillDataFormatText_({ testOnly: !!data.testOnly, proof: !!data.proof, sample: !!data.sample }));
+    }
     return jsonResponse({error:'不明なアクション'});
   } catch(err) { return jsonResponse({error:err.message}); }
 }
@@ -704,8 +712,13 @@ function saveWaterWeeks(month, startDate, weeks) {
     }
   }
   flushRowUpdates(sheet,updates);
+  // B方式 (2026-06-12): データ値列(5..33=FIELD_MAP 29列)を '@' 統一（電気 e83ba0b と同パターン）。
+  // キー列1-4(月/週/曜/日付)・updatedAt列34 は対象外。範囲単位コールのみ。
+  setNumberFormatGroups(sheet,updates,5,29);
   if(newRows.length>0){
-    sheet.getRange(sheet.getLastRow()+1,1,newRows.length,newRows[0].length).setValues(newRows);
+    var appendStart=sheet.getLastRow()+1;
+    sheet.getRange(appendStart,5,newRows.length,29).setNumberFormat('@'); // 書込前に '@'（初回書込から文字列保持）
+    sheet.getRange(appendStart,1,newRows.length,newRows[0].length).setValues(newRows);
   }
   sortSheet(sheet);
   return cnt;
@@ -788,6 +801,7 @@ function saveEquipmentData(data) {
       block.push(updates[u2].values);
       u2++;
     }
+    sheet.getRange(startRow, 4, block.length, 5).setNumberFormat('@'); // B方式: データ値列(4..8=月〜金)を '@'（連続区間単位）
     sheet.getRange(startRow, 1, block.length, COL_COUNT).setValues(block);
     u = u2;
   }
@@ -795,6 +809,7 @@ function saveEquipmentData(data) {
   // 新規行: 末尾に setValues 1 回で一括 append
   if (appends.length > 0) {
     var appendStartRow = sheet.getLastRow() + 1;
+    sheet.getRange(appendStartRow, 4, appends.length, 5).setNumberFormat('@'); // B方式: 書込前に '@'
     sheet.getRange(appendStartRow, 1, appends.length, COL_COUNT).setValues(appends);
   }
 
@@ -860,8 +875,11 @@ function saveMechanicalData(data) {
     if(ri){updates.push({r:ri,v:rv});}else{newRows.push(rv);} cnt++;
   }}
   flushRowUpdates(sheet,updates);
+  setNumberFormatGroups(sheet,updates,4,1); // B方式: データ値列(4=JSON)を '@'（キー列1-3・updatedAt列5 は対象外）
   if(newRows.length>0){
-    sheet.getRange(sheet.getLastRow()+1,1,newRows.length,newRows[0].length).setValues(newRows);
+    var appendStart=sheet.getLastRow()+1;
+    sheet.getRange(appendStart,4,newRows.length,1).setNumberFormat('@'); // B方式: 書込前に '@'
+    sheet.getRange(appendStart,1,newRows.length,newRows[0].length).setValues(newRows);
   }
   return jsonResponse({status:'ok',message:'機械'+cnt+'日分保存',savedCount:cnt});
 }
@@ -1869,6 +1887,66 @@ function backfillElecFormatText_() {
   sh.getRange(1, 4, rows, ELEC_FIELDS.length).setNumberFormat('@');   // D〜BJ データ列のみ → 文字列
   sh.getRange(1, uaCol, rows, 1).setNumberFormat('yyyy/mm/dd');       // updatedAt → 日付へ復帰
   return { status:'OK', dataCols: ELEC_FIELDS.length, updatedAtCol: uaCol, formattedRows: rows };
+}
+
+// B方式 (2026-06-12): 全データシートのデータ値列へ '@' を一括適用する backfill（kamitono 横展開・検証内蔵版）。
+// idempotent・データ非破壊。Sheets 仕様で '@' 適用時に既存数値セルは文字列型へ変換される（kake 電気 e83ba0b 本番実績）。
+// 型のみの変化(typeOnlyDiffs)は想定内、文字列表現が変わる valueStrDiffs>0 のみ異常。
+// testOnly=true: 各シート先頭1データ行のみ / sample=true: 書式適用せず値・型を返す / proof=true: 一時行で '16.0' 保持実証。
+function backfillDataFormatText_(opts) {
+  opts = opts || {};
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var targets = [
+    { name: '日常水質',       startCol: 5, numCols: 29 },
+    { name: '機器運転時間',   startCol: 4, numCols: 5 },
+    { name: '日常電気設備',   startCol: 4, numCols: ELEC_FIELDS.length },
+    { name: '日常機械設備',   startCol: 4, numCols: 1 }
+  ];
+  var report = { status: 'OK', mode: opts.sample ? 'sample' : (opts.testOnly ? 'test' : 'full'), sheets: [] };
+  for (var t = 0; t < targets.length; t++) {
+    var spec = targets[t], sh = ss.getSheetByName(spec.name);
+    if (!sh) { report.sheets.push({ name: spec.name, error: 'シートなし' }); report.status = 'ERROR'; continue; }
+    var lastRow = sh.getLastRow();
+    var rows = opts.testOnly ? Math.min(1, lastRow - 1) : Math.max(sh.getMaxRows(), lastRow) - 1;
+    if (rows < 1) { report.sheets.push({ name: spec.name, skipped: 'データ行なし' }); continue; }
+    var rng = sh.getRange(2, spec.startCol, rows, spec.numCols);
+    if (opts.sample) {
+      var sv = rng.getValues();
+      var firstR = sv[0] || [], lastR = sv[Math.max(lastRow - 2, 0)] || [];
+      report.sheets.push({ name: spec.name,
+        first: firstR.map(function(v){ return typeof v + ':' + v; }),
+        last: lastR.map(function(v){ return typeof v + ':' + v; }) });
+      continue;
+    }
+    var before = rng.getValues();
+    rng.setNumberFormat('@');
+    var after = rng.getValues();
+    var typeOnly = 0, strDiffs = 0, samples = [];
+    for (var i = 0; i < before.length; i++) {
+      for (var j = 0; j < before[i].length; j++) {
+        var b = before[i][j], a = after[i][j];
+        if (String(b) !== String(a)) {
+          strDiffs++;
+          if (samples.length < 5) samples.push({ r: i + 2, c: spec.startCol + j, before: String(b), after: String(a) });
+        } else if (typeof b !== typeof a) { typeOnly++; }
+      }
+    }
+    var entry = { name: spec.name, rows: rows, cols: spec.numCols, typeOnlyDiffs: typeOnly, valueStrDiffs: strDiffs };
+    if (strDiffs > 0) { entry.diffSamples = samples; report.status = 'VALUE_DIFF'; }
+    if (opts.proof && !opts.testOnly) {
+      var mr0 = sh.getMaxRows();
+      sh.insertRowsAfter(mr0, 1);
+      var pc = sh.getRange(mr0 + 1, spec.startCol);
+      pc.setNumberFormat('@');
+      pc.setValues([['16.0']]);
+      var back = pc.getValues()[0][0];
+      entry.proof = { value: back, type: typeof back, preserved: back === '16.0' };
+      sh.deleteRow(mr0 + 1);
+      if (!entry.proof.preserved) report.status = 'PROOF_FAIL';
+    }
+    report.sheets.push(entry);
+  }
+  return report;
 }
 
 // フラットタブの旧テンプレ模倣残骸クリーンアップ (2026-06-03)
