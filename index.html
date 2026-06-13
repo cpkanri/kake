@@ -5277,6 +5277,14 @@ async function exportExcel() {
     });
   } catch (e) { console.error("フォント統一:", e); }
 
+  // 機器運転時間: Print_Area 不在で空白列 I〜L まで印刷対象になり横6ページ化していた。
+  // 実コンテンツは H 列まで（値・結合とも最大 H、I〜L は空の列定義のみ）。A1:H145 に限定する。
+  // ※ workbook.xml への直接追記は ExcelJS が落とすため、必ず pageSetup API で設定すること。
+  try {
+    const wsEqPA = wb.getWorksheet("機器運転時間");
+    if (wsEqPA) wsEqPA.pageSetup.printArea = "A1:H145";
+  } catch (e) { console.error("printArea(機器運転時間):", e); }
+
   let out = await wb.xlsx.writeBuffer();
   out = await sanitizeXlsxBuffer(out);
   out = await restorePageBreaks(out, EXCEL_TEMPLATE_B64, { skipBases: [], reverseRename: {} });
