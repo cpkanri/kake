@@ -6209,6 +6209,19 @@ function fillElecSheet(ws, yyyy, mm) {
     }
   }
 
+  // 罫線補正(2026-06-17): 「余剰汚泥流量計／流量計積算読み」行(各週 base+48)の K列右罫線
+  // （＝表の右端 K|L 境界）が、テンプレ起因で週3(=R193)のみ欠落していた。
+  // 原因: K193 はテンプレ上 style1012(border49: right なし) の孤立セルで、他週の同一行
+  // (K51/K122/K264/K335) は style963(border34: right=thin)。日常電気設備シートは L列に
+  // セルが一切無いため、この境界線は K の右罫線のみが描画する。
+  // 対策(再発防止): 単発セルのハードコードではなく、全5週の当該行 K セルへ「右thin」を
+  // 冪等付与する（既存4週は右thin済のため無変化、週3のみ補完）。上下左の既存罫線は保持。
+  for (let w = 1; w <= 5; w++) {
+    const kCell = ws.getCell(WEEK_START[w] + 48, 11); // K列 = 余剰 積算読み行（base+48）
+    const merged = Object.assign({}, kCell.border, { right: { style: 'thin' } });
+    kCell.border = merged;
+  }
+
   // 修正A: 空の週ブロックは非表示。1ブロック=71行（自前タイトル R1 を含む）。週w = [(w-1)*71+1 .. +70]。
   for (let w = 1; w <= 5; w++) {
     if (elecWeekEmpty(w, yyyy, mm)) { const s = (w - 1) * 71 + 1; hideRowRange(ws, s, s + 70); }
