@@ -5522,8 +5522,11 @@ function fillWaterSheet(ws, yyyy, mm, holidaySet) {
           (_chlor === null || _chlor === undefined || _chlor === "")) {
         ws.getCell(dataRowBase + 33, colMeasure).value = 0;
       }
-      // 測定者: 測定場所テーブル所属なのでJ列起点
-      if (day.inspector) setCell(ws, inspRow, colMeasure, day.inspector);
+      // 測定者: 測定場所テーブル所属なのでJ列起点。
+      // 修正(2026-06-17): 月単位測定者(applyMonthInspectorToAllDays)が祝日・未点検日にも
+      // inspector 値を格納しうるため、出力側で dayHasMeasurement(実測=inspector/bikou以外が非空)
+      // を判定し、実測のある日のみ測定者名を書く。祝日/未点検は空欄（祝日リストではなくデータ有無で判定）。
+      if (day.inspector && dayHasMeasurement(day)) setCell(ws, inspRow, colMeasure, day.inspector);
     }
 
     // 備考（加計: Row = dataRowBase + 34 → 第1週R38）: 測定場所テーブル所属なのでJ列起点
