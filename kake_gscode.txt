@@ -56,8 +56,13 @@ function normalizeMonth(v) {
     return v.getFullYear() + '-' + ('0' + (v.getMonth() + 1)).slice(-2);
   }
   var s = String(v).trim();
+  // "YYYY-MM-DD" or "YYYY/MM/DD"（日付文字列：日付つき）→ 月へ畳む
+  // 旧4月行(文字列 "2026/04/01" / "2026-04-01" 等) を "2026-04" と同一視するための分岐。
+  // 既存の月のみ一致 (^(\d{4})[-\/](\d{1,2})$) より前に置く必要がある（冪等）。
+  var m = s.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);
+  if (m) return m[1] + '-' + ('0' + m[2]).slice(-2);
   // "YYYY-MM" or "YYYY-M"
-  var m = s.match(/^(\d{4})[-\/](\d{1,2})$/);
+  m = s.match(/^(\d{4})[-\/](\d{1,2})$/);
   if (m) return m[1] + '-' + ('0' + m[2]).slice(-2);
   // "YYYY年MM月" or "YYYY年M月"
   m = s.match(/^(\d{4})年(\d{1,2})月$/);
@@ -129,6 +134,7 @@ function calcMldoBase(waterTemp) {
 // 当月のMLDO計算状態をチェック（ボタンバッジ用）
 function checkMldoStatus(month) {
   if (!month) return jsonResponse({error:'月が指定されていません'});
+  month = normalizeMonth(month) || month; // 月キー統一: "YYYY-M"/日付文字列を "YYYY-MM" へ（MLDOログ比較の両辺を対称化）
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var ws = ss.getSheetByName('日常水質');
@@ -666,6 +672,7 @@ function doPost(e) {
 // ===== 日常水質 =====
 function getData(month) {
   if(!month) return jsonResponse({error:'月が指定されていません'});
+  month=normalizeMonth(month); // 月キー統一: 受信側も "2026-04" に畳んで matchMonth の両辺を対称化
   var ss=SpreadsheetApp.getActiveSpreadsheet(),sheet=ss.getSheetByName('日常水質'),lr=sheet.getLastRow();
   if(lr<=1) return jsonResponse({data:[],month:month});
   var vals=sheet.getRange(2,1,lr-1,34).getValues(),result=[];
@@ -681,6 +688,7 @@ function getData(month) {
 // tempFinal/transFinal/phFinal / updatedAt=col34）は改修前と厳密に同一。findRow→索引・per-row→
 // batched 以外のロジック（空 dd skip・toDateStr・FIELD_MAP ループ順）は不変。
 function saveWaterWeeks(month, startDate, weeks) {
+  month=normalizeMonth(month); // 月キー統一: 旧書式(2026/04/01 等)も "2026-04" に畳んで保存・比較
   var ss=SpreadsheetApp.getActiveSpreadsheet(),sheet=ss.getSheetByName('日常水質');
   if(!sheet) return 0;
   var now=new Date(),cnt=0;
@@ -709,6 +717,7 @@ function saveWaterWeeks(month, startDate, weeks) {
   setNumberFormatGroups(sheet,updates,5,29);
   if(newRows.length>0){
     var appendStart=sheet.getLastRow()+1;
+    sheet.getRange(appendStart,1,newRows.length,1).setNumberFormat('@'); // 月キー列(A)もテキスト固定（自動Date化防止・YYYY-MM 保持）
     sheet.getRange(appendStart,5,newRows.length,29).setNumberFormat('@'); // 書込前に '@'（初回書込から文字列保持）
     sheet.getRange(appendStart,1,newRows.length,newRows[0].length).setValues(newRows);
   }
@@ -735,7 +744,7 @@ function saveAllData(data) {
 // 新: 既存全行を 1 回の getValues で読込 → in-memory で update/append 判定
 //     → 連続更新区間ごとに setValues 1 回 + 新規分末尾 setValues 1 回 (典型 1〜数回)
 function saveEquipmentData(data) {
-  var month = data.month, eq = data.equipment;
+  var month = normalizeMonth(data.month), eq = data.equipment;
   if (!month || !eq) return jsonResponse({error:'パラメータ不足'});
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName('機器運転時間');
@@ -801,6 +810,7 @@ function saveEquipmentData(data) {
   // 新規行: 末尾に setValues 1 回で一括 append
   if (appends.length > 0) {
     var appendStartRow = sheet.getLastRow() + 1;
+    sheet.getRange(appendStartRow, 1, appends.length, 1).setNumberFormat('@'); // 月キー列(A)もテキスト固定（自動Date化防止・YYYY-MM 保持）
     sheet.getRange(appendStartRow, 4, appends.length, 5).setNumberFormat('@'); // B方式: 書込前に '@'
     sheet.getRange(appendStartRow, 1, appends.length, COL_COUNT).setValues(appends);
   }
@@ -813,7 +823,7 @@ function saveEquipmentData(data) {
 // rv（[month,week,day] + ELEC_FIELDS 値 + updatedAt）は改修前と厳密に同一。
 // データ列(D〜)の '@' 書式統一は「書込んだ全行のみ」へ batched 適用（従来挙動を保全）。
 function saveElectricalData(data) {
-  var month=data.month,el=data.electrical; if(!month||!el) return jsonResponse({error:'パラメータ不足'});
+  var month=normalizeMonth(data.month),el=data.electrical; if(!month||!el) return jsonResponse({error:'パラメータ不足'});
   var ss=SpreadsheetApp.getActiveSpreadsheet(),sheet=ss.getSheetByName('日常電気設備');
   if(!sheet) return jsonResponse({error:'シートなし'}); var now=new Date(),cnt=0;
   var lr=sheet.getLastRow(),indexMap={};
@@ -837,8 +847,9 @@ function saveElectricalData(data) {
   setNumberFormatGroups(sheet,updates,4,EL); // 既存更新行のデータ列(D〜)を '@' に（連続グループ単位）
   if(newRows.length>0){
     var appendStart=sheet.getLastRow()+1;
-    sheet.getRange(appendStart,1,newRows.length,newRows[0].length).setValues(newRows);
+    sheet.getRange(appendStart,1,newRows.length,1).setNumberFormat('@'); // 月キー列(A)もテキスト固定（自動Date化防止・YYYY-MM 保持）
     sheet.getRange(appendStart,4,newRows.length,EL).setNumberFormat('@'); // 新規行のデータ列(D〜)を '@' に
+    sheet.getRange(appendStart,1,newRows.length,newRows[0].length).setValues(newRows);
   }
   return jsonResponse({status:'ok',message:'電気'+cnt+'日分保存',savedCount:cnt});
 }
@@ -847,7 +858,7 @@ function saveElectricalData(data) {
 // Phase 25-c-ζ: N+1 根絶版（機械）。findRow 毎行 getValues を撤廃し索引マップへ。
 // rv（[month,week,day,JSON,updatedAt]）は改修前と厳密に同一。col4 の JSON マッピング不変。
 function saveMechanicalData(data) {
-  var month=data.month,mech=data.mechanical; if(!month||!mech) return jsonResponse({error:'パラメータ不足'});
+  var month=normalizeMonth(data.month),mech=data.mechanical; if(!month||!mech) return jsonResponse({error:'パラメータ不足'});
   var ss=SpreadsheetApp.getActiveSpreadsheet(),sheet=ss.getSheetByName('日常機械設備');
   if(!sheet) return jsonResponse({error:'シートなし'}); var now=new Date(),cnt=0;
   var lr=sheet.getLastRow(),indexMap={};
@@ -870,6 +881,7 @@ function saveMechanicalData(data) {
   setNumberFormatGroups(sheet,updates,4,1); // B方式: データ値列(4=JSON)を '@'（キー列1-3・updatedAt列5 は対象外）
   if(newRows.length>0){
     var appendStart=sheet.getLastRow()+1;
+    sheet.getRange(appendStart,1,newRows.length,1).setNumberFormat('@'); // 月キー列(A)もテキスト固定（自動Date化防止・YYYY-MM 保持）
     sheet.getRange(appendStart,4,newRows.length,1).setNumberFormat('@'); // B方式: 書込前に '@'
     sheet.getRange(appendStart,1,newRows.length,newRows[0].length).setValues(newRows);
   }
@@ -889,6 +901,7 @@ function saveEverything(data) {
 // ===== 全データ取得 =====
 function getAllData(month) {
   if(!month) return jsonResponse({error:'月が指定されていません'});
+  month=normalizeMonth(month); // 月キー統一: 受信側も "2026-04" に畳んで matchMonth の両辺を対称化
   var ss=SpreadsheetApp.getActiveSpreadsheet(),result={month:month,water:[],equipment:[],electrical:[],mechanical:[]};
   var ws=ss.getSheetByName('日常水質');
   if(ws&&ws.getLastRow()>1){var v=ws.getRange(2,1,ws.getLastRow()-1,34).getValues();
@@ -2066,4 +2079,90 @@ function compactMechSheet_(dryRun) {
   if (rows.length > 0) sh.getRange(2, 5, rows.length, 1).setNumberFormat('yyyy/mm/dd hh:mm'); // E列 日付書式
   summary.newLastRow = 1 + rows.length;
   return summary;
+}
+
+// ===== month キー診断（読取り専用。書込みなし）=====
+// 加計の全データシート(A列=月)について typeof / instanceof Date / 正規化結果を出力し、
+// 「正規化前のテキスト表現が正規化結果と一致しない＝旧書式で読み落とされ得る行」を抽出する。
+// さらに getAllData('2026-04') を実行し、4月データが実際に取得できるか実証する。
+function diagnoseMonthKeys() {
+  var SHEETS = ['日常水質', '機器運転時間', '日常電気設備', '日常機械設備'];
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var report = { sheets: {}, legacyRows: [] };
+  SHEETS.forEach(function(name) {
+    var ws = ss.getSheetByName(name);
+    if (!ws) { report.sheets[name] = { exists: false }; return; }
+    var lr = ws.getLastRow();
+    if (lr <= 1) { report.sheets[name] = { exists: true, rows: 0, months: {}, types: {} }; return; }
+    var data = ws.getRange(2, 1, lr - 1, 1).getValues();
+    var info = { exists: true, rows: data.length, months: {}, types: {} };
+    for (var i = 0; i < data.length; i++) {
+      var raw = data[i][0];
+      var isDate = !!(raw && typeof raw.getFullYear === 'function');
+      var t = isDate ? 'Date' : typeof raw;
+      info.types[t] = (info.types[t] || 0) + 1;
+      var norm = normalizeMonth(raw);
+      info.months[norm] = (info.months[norm] || 0) + 1;
+      // 旧書式判定：Date型、または文字列表現が正規化結果と異なる（= 2026/04/01 等）
+      var rawText = isDate ? ('DATE(' + raw.getFullYear() + '/' + (raw.getMonth() + 1) + '/' + raw.getDate() + ')') : String(raw);
+      if (raw === '' || raw === null || raw === undefined) continue;
+      if (isDate || rawText !== norm) {
+        report.legacyRows.push({ sheet: name, row: i + 2, raw: rawText, type: t, normalized: norm });
+        Logger.log('[LEGACY] ' + name + ' 行' + (i + 2) + ': raw=' + rawText + ' type=' + t + ' → ' + norm);
+      }
+    }
+    report.sheets[name] = info;
+    Logger.log('=== ' + name + ' === rows=' + info.rows + ' types=' + JSON.stringify(info.types) + ' months=' + JSON.stringify(info.months));
+  });
+  // 実証：4月を現行読取ロジックで取得（getAllData は TextOutput を返すため getContent() をパース）
+  var aprOut = getAllData('2026-04');
+  var apr = {};
+  try { apr = JSON.parse(aprOut.getContent()); } catch (e) { apr = {}; }
+  report.april2026 = {
+    water: (apr.water || []).length,
+    equipment: (apr.equipment || []).length,
+    electrical: (apr.electrical || []).length,
+    mechanical: (apr.mechanical || []).length
+  };
+  Logger.log('=== getAllData(2026-04) === water=' + report.april2026.water + ' equipment=' + report.april2026.equipment
+    + ' electrical=' + report.april2026.electrical + ' mechanical=' + report.april2026.mechanical);
+  Logger.log('旧書式行 合計: ' + report.legacyRows.length + ' 件');
+  return report;
+}
+
+// ===== month キー移行（任意・整合性のため）=====
+// dryRun=true（既定）: 変化する行のみ old→new を Logger 出力し、書込みは一切行わない。
+// dryRun=false       : 変化行のみ A列をテキスト YYYY-MM で上書き（Date型もテキスト化）。
+// ※本適用前にスプレッドシートのバックアップ（Drive複製）を必ず取得すること。
+function migrateMonthKeys(dryRun) {
+  if (dryRun === undefined) dryRun = true; // 既定はドライラン（安全側）
+  var SHEETS = ['日常水質', '機器運転時間', '日常電気設備', '日常機械設備'];
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var changes = [];
+  SHEETS.forEach(function(name) {
+    var ws = ss.getSheetByName(name);
+    if (!ws) return;
+    var lr = ws.getLastRow();
+    if (lr <= 1) return;
+    var data = ws.getRange(2, 1, lr - 1, 1).getValues();
+    for (var i = 0; i < data.length; i++) {
+      var raw = data[i][0];
+      if (raw === '' || raw === null || raw === undefined) continue;
+      var isDate = !!(raw && typeof raw.getFullYear === 'function');
+      var norm = normalizeMonth(raw);
+      var rawText = isDate ? ('DATE(' + raw.getFullYear() + '/' + (raw.getMonth() + 1) + '/' + raw.getDate() + ')') : String(raw);
+      // テキスト表現が正規化結果と異なる、または Date 型 → 移行対象
+      if (isDate || String(raw) !== norm) {
+        changes.push({ sheet: name, row: i + 2, old: rawText, 'new': norm });
+        Logger.log((dryRun ? '[DRY] ' : '[APPLY] ') + name + ' 行' + (i + 2) + ': ' + rawText + ' → ' + norm);
+        if (!dryRun) {
+          var cell = ws.getRange(i + 2, 1);
+          cell.setNumberFormat('@');   // 先にテキスト書式へ（自動Date化防止）
+          cell.setValue(norm);
+        }
+      }
+    }
+  });
+  Logger.log('=== migrateMonthKeys(' + (dryRun ? 'DRY-RUN' : 'APPLY') + ') 変化行: ' + changes.length + ' 件 ===');
+  return { dryRun: dryRun, totalChanges: changes.length, changes: changes };
 }
