@@ -4967,7 +4967,7 @@ function writeMechEmptyCell(ws, row, col, fieldKey, val, date) {
   var emptyVal = getMechEmptyValue(fieldKey, val);
   var cell = ws.getCell(row, col);
   cell.value = emptyVal;
-  if (emptyVal === "-") cell.numFmt = "@";
+  if (emptyVal === "-") cell.style = Object.assign({}, cell.style, { numFmt: "@" });
 }
 
 // Part2: 電気設備の空セル用。機械と同基準（非祝日の空欄→「-」(U+002D)/祝日→空欄、numFmt="@"）。
@@ -4982,7 +4982,7 @@ function writeElecEmptyCell(ws, row, col, date) {
   }
   var cell = ws.getCell(row, col);
   cell.value = "-";
-  cell.numFmt = "@";
+  cell.style = Object.assign({}, cell.style, { numFmt: "@" });
 }
 
 // 2026-06-12 B方式: preserveTypedDecimals フラグを撤廃し、指示書1(3)仕様＝kamitono v87 と同一の
@@ -6152,6 +6152,9 @@ function fillElecSheet(ws, yyyy, mm) {
     generatorLook:64, fuelTankLook:65, fuelRemain:66,
     alarmStatus:67
   };
+  // 動力制御盤 読み/使用量: 整数でも小数1桁(.0)を表示する。テンプレ書式が不統一(ctrl4はGeneral)なため
+  // 値書込後に1桁小数書式を明示付与する。共有style破壊を避け Object.assign で新styleを割当（既存の小数書式は維持）。
+  const CTRL_PANEL_DECIMAL = new Set(["ctrlPanel1Read","ctrlPanel1Use","ctrlPanel2Read","ctrlPanel2Use","ctrlPanel3Read","ctrlPanel3Use","ctrlPanel4Read","ctrlPanel4Use"]);
   for (let w = 1; w <= 5; w++) {
     const base = WEEK_START[w];
     const headerRow = DATE_HEADER_ROW[w];
@@ -6206,6 +6209,11 @@ function fillElecSheet(ws, yyyy, mm) {
         if (v !== null && v !== undefined && v !== "") {
           hasElecData = true;
           setCell(ws, base + OFFSETS[key], col, v);
+          if (CTRL_PANEL_DECIMAL.has(key)) {
+            const pc = ws.getCell(base + OFFSETS[key], col);
+            const keepFmt = (pc.numFmt && pc.numFmt !== "@" && /\.0/.test(pc.numFmt)) ? pc.numFmt : "0.0";
+            pc.style = Object.assign({}, pc.style, { numFmt: keepFmt });
+          }
         } else {
           writeElecEmptyCell(ws, base + OFFSETS[key], col, actual);
         }
