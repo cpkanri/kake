@@ -1840,6 +1840,12 @@ ELEC_SECTIONS.forEach(sec => {
 const MECH_DAYS = ["mon", "tue", "wed", "thu", "fri"];
 
 // 機械設備項目定義（加計浄化センター: page1 R4-R65 + page2 R70-R116、約70項目）
+// 可動堰・ゲートの既定開度（空欄時にプレースホルダ薄グレー表示＋Excel出力で既定値を使用）
+const KAKE_GATE_DEFAULTS = {
+  ditchWeir: 330,
+  ditchOutGate: 300,
+  ditchConnectGate: 0,
+};
 const MECH_SECTIONS = [
   // ===== ページ 1/2 =====
   { title: "ポンプ井", fields: [
@@ -2788,7 +2794,8 @@ function buildMechTable() {
       MECH_DAYS.forEach(d => {
         if (f.type === "number") {
           // Phase 12: 「-」と全角ハイフン入力を許容するため type="text" + 正規化バリデーション
-          html += '<td><input type="text" inputmode="decimal" data-elec-mech-numeric="1" placeholder="-" data-mech="' + f.key + '" data-mday="' + d + '"></td>';
+          const _ph = (typeof KAKE_GATE_DEFAULTS !== 'undefined' && KAKE_GATE_DEFAULTS[f.key] != null) ? KAKE_GATE_DEFAULTS[f.key] : '-';
+          html += '<td><input type="text" inputmode="decimal" data-elec-mech-numeric="1" placeholder="' + _ph + '" data-mech="' + f.key + '" data-mday="' + d + '"></td>';
         } else {
           html += '<td><button type="button" class="toggle-btn" data-mech="' + f.key + '" data-mday="' + d + '" data-options=\'' + JSON.stringify(f.options) + '\'></button></td>';
         }
@@ -4940,6 +4947,13 @@ function getMechEmptyValue(fieldKey, value) {
 // Phase 22 補追 2: 出力文字を U+002D "-" に変更
 // Phase 22 補追 3: date 引数受取り、祝日セルは null（空欄）維持で「-」を出力しない
 function writeMechEmptyCell(ws, row, col, fieldKey, val, date) {
+  // 可動堰・ゲート: 空欄なら既定開度を出力（「-」/祝日空欄より優先・祝日含め常に適用）
+  if ((val === null || val === undefined || val === "") &&
+      typeof KAKE_GATE_DEFAULTS !== 'undefined' &&
+      Object.prototype.hasOwnProperty.call(KAKE_GATE_DEFAULTS, fieldKey)) {
+    setCell(ws, row, col, KAKE_GATE_DEFAULTS[fieldKey]);
+    return;
+  }
   if (date) {
     try {
       var hs = getHolidaySetFromCache();
