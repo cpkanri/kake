@@ -4947,13 +4947,7 @@ function getMechEmptyValue(fieldKey, value) {
 // Phase 22 補追 2: 出力文字を U+002D "-" に変更
 // Phase 22 補追 3: date 引数受取り、祝日セルは null（空欄）維持で「-」を出力しない
 function writeMechEmptyCell(ws, row, col, fieldKey, val, date) {
-  // 可動堰・ゲート: 空欄なら既定開度を出力（「-」/祝日空欄より優先・祝日含め常に適用）
-  if ((val === null || val === undefined || val === "") &&
-      typeof KAKE_GATE_DEFAULTS !== 'undefined' &&
-      Object.prototype.hasOwnProperty.call(KAKE_GATE_DEFAULTS, fieldKey)) {
-    setCell(ws, row, col, KAKE_GATE_DEFAULTS[fieldKey]);
-    return;
-  }
+  // 祝日（休みの日）は他項目と同様に空欄維持（可動堰・ゲートの既定値もここでは出力しない）
   if (date) {
     try {
       var hs = getHolidaySetFromCache();
@@ -4962,6 +4956,13 @@ function writeMechEmptyCell(ws, row, col, fieldKey, val, date) {
         return;
       }
     } catch (e) { /* キャッシュ取得失敗時は既存挙動（"-"出力）にフォールバック */ }
+  }
+  // 可動堰・ゲート: 非祝日で空欄なら既定開度を出力（祝日は上で空欄維持済み）
+  if ((val === null || val === undefined || val === "") &&
+      typeof KAKE_GATE_DEFAULTS !== 'undefined' &&
+      Object.prototype.hasOwnProperty.call(KAKE_GATE_DEFAULTS, fieldKey)) {
+    setCell(ws, row, col, KAKE_GATE_DEFAULTS[fieldKey]);
+    return;
   }
   var emptyVal = getMechEmptyValue(fieldKey, val);
   var cell = ws.getCell(row, col);
