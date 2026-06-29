@@ -4504,7 +4504,7 @@ function bindEvents() {
   });
 
   // 列コピー共通関数（テーブル形式タブ用: ← ボタンから呼ばれる・空日スキップ）
-  function copyColumn(tableType, targetDay) {
+  async function copyColumn(tableType, targetDay) {
     const daysArr = (tableType === "mech") ? MECH_DAYS : EQUIP_DAYS;
     const idx = daysArr.indexOf(targetDay);
     if (idx < 0) return;
@@ -4515,6 +4515,10 @@ function bindEvents() {
       srcLabel = (found.week !== currentWeek ? "第" + found.week + "週" : "") + (DAY_LABELS[found.day] || found.day);
     } else {
       pm = getPrevMonthCopySource(tableType);
+      if (!pm) {
+        showToast("前月データを取得中…");
+        if (await ensurePrevMonthInStorage(prevMonthStr())) pm = getPrevMonthCopySource(tableType);
+      }
       if (!pm) {
         showToast("コピー元のデータがありません", "error");
         return;
