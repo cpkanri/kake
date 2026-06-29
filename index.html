@@ -2417,6 +2417,48 @@ function getPrevMonthCopySource(sheetType) {
   } catch (e) { return null; }
 }
 
+// ===== 前日コピー: 前月がローカル未キャッシュのときサーバーから取得（2026-06-29）=====
+// 一時的に weeklyData を前月の空構造へ退避し、既存 mergeServerData を再利用して構築 →
+// localStorage 保存 → finally で必ず元の月へ復元する（ライブ状態を汚さない）。
+function prevMonthStr() {
+  var ym = String(weeklyData.targetMonth || "").split("-");
+  var y = parseInt(ym[0], 10), m = parseInt(ym[1], 10);
+  if (isNaN(y) || isNaN(m)) return null;
+  return m === 1 ? (y - 1) + "-12" : y + "-" + String(m - 1).padStart(2, "0");
+}
+
+async function ensurePrevMonthInStorage(prevMonth) {
+  if (!prevMonth) return false;
+  var key = "kake_weekly_" + prevMonth;
+  if (localStorage.getItem(key)) return true; // 既にキャッシュ済み
+  var serverData;
+  try {
+    serverData = await loadFromServer(prevMonth);
+  } catch (e) {
+    console.warn("[copy] 前月サーバー取得失敗:", e);
+    return false;
+  }
+  if (!serverData) return false;
+  var backup = weeklyData;
+  try {
+    weeklyData = {
+      targetMonth: prevMonth,
+      startDate: estimateStartDate(prevMonth),
+      monthInspector: "",
+      weeks: {}, equipment: {}, electrical: {}, mechanical: {}
+    };
+    ensureWeeklyStructure();
+    mergeServerData(serverData, prevMonth);
+    safeSetItem(key, JSON.stringify(weeklyData));
+  } catch (e) {
+    console.warn("[copy] 前月キャッシュ構築失敗:", e);
+    return false; // finally で必ず復元される
+  } finally {
+    weeklyData = backup; // 例外有無に関わらず元の月へ復元
+  }
+  return !!localStorage.getItem(key);
+}
+
 // ===== 未保存マーカー =====
 let isDirty = false;
 function markDirty() {
@@ -4360,7 +4402,7 @@ function bindEvents() {
   // startDate は readonly（自動計算）のため change イベントは不要
 
   // 前日コピー（全タブ対応・空日スキップ）
-  document.getElementById("btnCopy").addEventListener("click", () => {
+  document.getElementById("btnCopy").addEventListener("click", async () => {
     if (currentSheet === "water") {
       saveFormToData();
       const order = ["mon", "tue", "wed", "thu", "fri"];
@@ -4371,8 +4413,13 @@ function bindEvents() {
         srcLabel = (found.week !== currentWeek ? "第" + found.week + "週" : "") + (DAY_LABELS[found.day] || found.day);
         src = weeklyData.weeks[found.week][found.day];
       } else {
-        // 2026-06-12: 当月内にコピー元なし → 前月 localStorage の最終データ日から（読み取り専用）
-        const pm = getPrevMonthCopySource("water");
+        // 当月内にコピー元なし → 前月 localStorage を参照（2026-06-12）
+        // 2026-06-29: 前月がローカル未キャッシュの場合はサーバーから取得・キャッシュしてから再探索。
+        let pm = getPrevMonthCopySource("water");
+        if (!pm) {
+          showToast("前月データを取得中…");
+          if (await ensurePrevMonthInStorage(prevMonthStr())) pm = getPrevMonthCopySource("water");
+        }
         if (!pm) {
           showToast("コピー元のデータがありません", "error");
           return;
@@ -4394,6 +4441,15 @@ function bindEvents() {
     if (currentSheet === "equip") saveEquipFormToData();
     else if (currentSheet === "elec") saveElecFormToData();
     else if (currentSheet === "mech") saveMechFormToData();
+
+    // 2026-06-29: 当月内にコピー元の無い曜日に備え、前月が未キャッシュなら先に取得
+    if (!localStorage.getItem("kake_weekly_" + prevMonthStr())) {
+      const mayNeedPrev = daysArr.some((d, di) => !findPrevDayWithData(currentSheet, currentWeek, di, daysArr));
+      if (mayNeedPrev) {
+        showToast("前月データを取得中…");
+        await ensurePrevMonthInStorage(prevMonthStr());
+      }
+    }
 
     let anyCopied = false;
     let usedPrevMonthLabel = null;

@@ -1,5 +1,5 @@
 // 加計浄化センター 週報 Service Worker
-const CACHE_NAME = 'kake-v77';
+const CACHE_NAME = 'kake-v78';
 const ASSETS = [
   './',
   './index.html',
