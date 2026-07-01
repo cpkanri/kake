@@ -3955,6 +3955,15 @@ async function syncFromServer() {
 
     const data = await loadFromServer(requestedMonth);
 
+    // 進行中のフォーム入力を先にモデルへ確定してからマージ/再描画する。
+    // これを行わないと、バックグラウンド同期(init/月切替)完了時の
+    // load*DataToForm() が未確定のDOM入力を上書きし、サーバー既存分
+    // （＝先に保存済みの月曜のみ）が残り、火〜金の入力が消える不具合になる。
+    if (currentSheet === "water") saveFormToData();
+    else if (currentSheet === "equip") saveEquipFormToData();
+    else if (currentSheet === "elec") saveElecFormToData();
+    else if (currentSheet === "mech") saveMechFormToData();
+
     // 注: 旧バージョンには前月・翌月もマージする処理があったが、
     // 週番号(1-5)単位でデータが上書きされ、対象月のフォームに前月データが残るバグの原因になっていたため削除。
     // 対象月のデータだけを読み込むことで、月切替時に前月データが残らないようにする。
